@@ -5,9 +5,12 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "migrate:s3": "tsx src/scripts/migrateStorageToS3.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1011.0",
+    "@aws-sdk/s3-request-presigner": "^3.1011.0",
     "@fal-ai/client": "^1.4.0",
     "axios": "^1.9.0",
     "better-sqlite3": "^11.10.0",

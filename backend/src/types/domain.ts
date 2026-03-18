@@ -36,6 +36,11 @@ export interface GarmentUploadRecord {
   filePath: string;
 }
 
+export interface UploadedStorageFileRecord {
+  originalName: string;
+  storagePath: string;
+}
+
 export interface JobOutputRecord {
   id: number;
   jobId: number;

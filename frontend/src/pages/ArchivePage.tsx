@@ -1,51 +1,57 @@
-import { useEffect, useMemo, useState } from 'react';
-import { CAlert, CButton, CCard, CCardBody, CCardHeader, CFormSelect, CFormTextarea, CSpinner } from '../ui';
+import { useEffect, useState } from 'react';
+import { flushSync } from 'react-dom';
+import { CAlert, CButton, CCard, CCardBody, CCardHeader, CFormSelect } from '../ui';
 import { EmptyState } from '../components/EmptyState';
+import { GarmentCarouselControls } from '../components/evaluation/GarmentCarouselControls';
+import { JobEvaluationCard } from '../components/evaluation/JobEvaluationCard';
 import { LoadingBlock } from '../components/LoadingBlock';
 import { PageHeader } from '../components/PageHeader';
-import { StatusBadge } from '../components/StatusBadge';
-import { fetchJobs, getApiErrorMessage, providerOptions, regenerateJob, resolveAssetUrl } from '../services/api';
-import type { JobRecord, ProviderKey } from '../types/api';
 import {
-  buildBatchLabel,
-  buildGarmentSlides,
-  buildJobBatches,
-  downloadBatchImages,
-  formatBatchDate,
-  getCurrentOutput,
-} from '../features/jobs/jobBatches';
+  fetchArchiveBatchJobs,
+  fetchArchiveBatches,
+  fetchArchiveClients,
+  getApiErrorMessage,
+  regenerateJob,
+  resolveAssetUrl,
+} from '../services/api';
+import type { ArchiveBatchSummary, ArchiveClientSummary, JobRecord } from '../types/api';
+import { downloadBatchImages, formatBatchDate, type JobBatch } from '../features/jobs/jobBatches';
+import { buildInitialDraft, syncJobDrafts, updateJobDraftState, type JobDraft } from '../features/jobs/jobDrafts';
+import { useGarmentCarousel } from '../features/jobs/useGarmentCarousel';
 
-interface JobDraft {
-  provider: ProviderKey;
-  prompt: string;
-}
+const archivePageSize = 20;
 
-const buildInitialDraft = (job: JobRecord): JobDraft => ({
-  provider: job.provider,
-  prompt: job.prompt,
-});
+const buildArchiveBatchLabel = (batch: ArchiveBatchSummary): string =>
+  `Trabajo #${batch.latestJobId} · ${formatBatchDate(batch.latestCreatedAt)} · ${batch.completedImages} imagen${
+    batch.completedImages === 1 ? '' : 'es'
+  }`;
 
 export const ArchivePage = () => {
-  const [jobs, setJobs] = useState<JobRecord[]>([]);
+  const [archiveClients, setArchiveClients] = useState<ArchiveClientSummary[]>([]);
+  const [archiveBatches, setArchiveBatches] = useState<ArchiveBatchSummary[]>([]);
+  const [batchJobs, setBatchJobs] = useState<JobRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingBatches, setLoadingBatches] = useState(false);
+  const [loadingBatchJobs, setLoadingBatchJobs] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [jobDrafts, setJobDrafts] = useState<Record<number, JobDraft>>({});
   const [queueingJobIds, setQueueingJobIds] = useState<number[]>([]);
   const [selectedClientId, setSelectedClientId] = useState('');
   const [selectedBatchId, setSelectedBatchId] = useState('');
-  const [selectedGarmentKey, setSelectedGarmentKey] = useState<string | null>(null);
   const [downloadingBatchId, setDownloadingBatchId] = useState<string | null>(null);
+  const [batchPage, setBatchPage] = useState(1);
+  const [batchTotalPages, setBatchTotalPages] = useState(0);
 
-  const loadJobs = async (showLoading = false) => {
+  const loadArchiveClients = async (showLoading = false) => {
     try {
       if (showLoading) {
         setLoading(true);
       }
 
       setError(null);
-      const response = await fetchJobs();
-      setJobs(response);
+      const response = await fetchArchiveClients();
+      setArchiveClients(response);
     } catch (loadError) {
       setError(getApiErrorMessage(loadError));
     } finally {
@@ -55,94 +61,67 @@ export const ArchivePage = () => {
     }
   };
 
+  const loadArchiveBatches = async (clientId: number, page: number) => {
+    try {
+      setLoadingBatches(true);
+      setError(null);
+
+      const response = await fetchArchiveBatches(clientId, page, archivePageSize);
+      setArchiveBatches(response.items);
+      setBatchPage(response.page);
+      setBatchTotalPages(response.totalPages);
+    } catch (loadError) {
+      setError(getApiErrorMessage(loadError));
+    } finally {
+      setLoadingBatches(false);
+    }
+  };
+
+  const loadBatchJobs = async (batchId: string, showLoading = false) => {
+    try {
+      if (showLoading) {
+        setLoadingBatchJobs(true);
+      }
+
+      setError(null);
+      const response = await fetchArchiveBatchJobs(batchId);
+      setBatchJobs(response);
+    } catch (loadError) {
+      setError(getApiErrorMessage(loadError));
+    } finally {
+      if (showLoading) {
+        setLoadingBatchJobs(false);
+      }
+    }
+  };
+
   useEffect(() => {
-    void loadJobs(true);
-
-    const intervalId = window.setInterval(() => {
-      void loadJobs();
-    }, 5000);
-
-    return () => window.clearInterval(intervalId);
+    void loadArchiveClients(true);
   }, []);
 
   useEffect(() => {
-    setJobDrafts((currentDrafts) => {
-      const nextDrafts: Record<number, JobDraft> = {};
-
-      jobs.forEach((job) => {
-        nextDrafts[job.id] = currentDrafts[job.id] ?? buildInitialDraft(job);
-      });
-
-      return nextDrafts;
-    });
-  }, [jobs]);
-
-  const batches = useMemo(() => buildJobBatches(jobs), [jobs]);
-  const currentBatch = batches[0] ?? null;
-
-  const archiveClientOptions = useMemo(
-    () =>
-      Array.from(
-        new Map(
-          batches
-            .filter((batch) => batch.clientId !== null)
-            .map((batch) => [String(batch.clientId), { id: String(batch.clientId), name: batch.clientName }]),
-        ).values(),
-      ),
-    [batches],
-  );
-
-  const archiveBatches = useMemo(
-    () =>
-      batches.filter(
-        (batch) =>
-          String(batch.clientId ?? '') === selectedClientId,
-      ),
-    [batches, selectedClientId],
-  );
-
-  const selectedBatch = archiveBatches.find((batch) => batch.batchId === selectedBatchId) ?? null;
-  const garmentSlides = useMemo(() => buildGarmentSlides(selectedBatch?.jobs ?? []), [selectedBatch]);
-
-  useEffect(() => {
-    if (garmentSlides.length === 0) {
-      setSelectedGarmentKey(null);
-      return;
-    }
-
-    const selectedSlideStillExists = selectedGarmentKey
-      ? garmentSlides.some((slide) => slide.key === selectedGarmentKey)
-      : false;
-
-    if (!selectedSlideStillExists) {
-      setSelectedGarmentKey(garmentSlides[0].key);
-    }
-  }, [garmentSlides, selectedGarmentKey]);
-
-  const activeSlideIndex = selectedGarmentKey
-    ? garmentSlides.findIndex((slide) => slide.key === selectedGarmentKey)
-    : -1;
-  const activeSlide =
-    activeSlideIndex >= 0 ? garmentSlides[activeSlideIndex] : garmentSlides[0] ?? null;
-
-  useEffect(() => {
-    if (archiveClientOptions.length === 0) {
+    if (archiveClients.length === 0) {
       setSelectedClientId('');
       return;
     }
 
-    const currentClientStillAvailable = archiveClientOptions.some((client) => client.id === selectedClientId);
+    const currentClientStillAvailable = archiveClients.some((client) => String(client.id) === selectedClientId);
 
     if (!currentClientStillAvailable) {
-      const preferredClientId =
-        currentBatch?.clientId !== null &&
-        archiveClientOptions.some((client) => client.id === String(currentBatch.clientId))
-          ? String(currentBatch.clientId)
-          : archiveClientOptions[0].id;
-
-      setSelectedClientId(preferredClientId);
+      setSelectedClientId(String(archiveClients[0].id));
     }
-  }, [archiveClientOptions, currentBatch?.clientId, selectedClientId]);
+  }, [archiveClients, selectedClientId]);
+
+  useEffect(() => {
+    if (!selectedClientId) {
+      setArchiveBatches([]);
+      setBatchPage(1);
+      setBatchTotalPages(0);
+      return;
+    }
+
+    void loadArchiveBatches(Number(selectedClientId), batchPage);
+  }, [selectedClientId, batchPage]);
 
   useEffect(() => {
     if (archiveBatches.length === 0) {
@@ -157,6 +136,57 @@ export const ArchivePage = () => {
     }
   }, [archiveBatches, selectedBatchId]);
 
+  useEffect(() => {
+    if (!selectedBatchId) {
+      setBatchJobs([]);
+      return;
+    }
+
+    void loadBatchJobs(selectedBatchId, true);
+  }, [selectedBatchId]);
+
+  useEffect(() => {
+    setJobDrafts((currentDrafts) => syncJobDrafts(batchJobs, currentDrafts));
+  }, [batchJobs]);
+
+  useEffect(() => {
+    setQueueingJobIds((currentIds) =>
+      currentIds.filter((jobId) => batchJobs.find((job) => job.id === jobId)?.status === 'pending'),
+    );
+  }, [batchJobs]);
+
+  const selectedBatch = archiveBatches.find((batch) => batch.batchId === selectedBatchId) ?? null;
+  const { activeSlide, activeSlideIndex, garmentSlides, goToSlide } = useGarmentCarousel(batchJobs);
+  const shouldPollArchive =
+    queueingJobIds.length > 0 || batchJobs.some((job) => job.status === 'pending' || job.status === 'processing');
+
+  useEffect(() => {
+    if (!shouldPollArchive || !selectedBatchId) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void Promise.allSettled([
+        loadBatchJobs(selectedBatchId),
+        selectedClientId ? loadArchiveBatches(Number(selectedClientId), batchPage) : Promise.resolve(),
+      ]);
+    }, 2500);
+
+    return () => window.clearInterval(intervalId);
+  }, [batchPage, selectedBatchId, selectedClientId, shouldPollArchive]);
+
+  const handleRefresh = async () => {
+    await loadArchiveClients(true);
+
+    if (selectedClientId) {
+      await loadArchiveBatches(Number(selectedClientId), batchPage);
+    }
+
+    if (selectedBatchId) {
+      await loadBatchJobs(selectedBatchId);
+    }
+  };
+
   const handleDownloadArchive = async () => {
     if (!selectedBatch) {
       return;
@@ -167,7 +197,18 @@ export const ArchivePage = () => {
       setSuccess(null);
       setDownloadingBatchId(selectedBatch.batchId);
 
-      const downloadedCount = await downloadBatchImages(selectedBatch, resolveAssetUrl);
+      const batchForDownload: JobBatch = {
+        batchId: selectedBatch.batchId,
+        clientId: selectedBatch.clientId,
+        clientName: selectedBatch.clientName,
+        modelName: selectedBatch.modelName,
+        jobs: batchJobs,
+        latestJobId: selectedBatch.latestJobId,
+        latestCreatedAt: selectedBatch.latestCreatedAt,
+        completedImages: selectedBatch.completedImages,
+      };
+
+      const downloadedCount = await downloadBatchImages(batchForDownload, resolveAssetUrl);
       setSuccess(`Se descargaron ${downloadedCount} imagen${downloadedCount === 1 ? '' : 'es'} del archivo.`);
     } catch (downloadError) {
       setError(getApiErrorMessage(downloadError));
@@ -177,21 +218,7 @@ export const ArchivePage = () => {
   };
 
   const updateJobDraft = (jobId: number, patch: Partial<JobDraft>) => {
-    setJobDrafts((currentDrafts) => ({
-      ...currentDrafts,
-      [jobId]: (() => {
-        const sourceJob = jobs.find((job) => job.id === jobId);
-
-        if (!sourceJob) {
-          return currentDrafts[jobId];
-        }
-
-        return {
-          ...(currentDrafts[jobId] ?? buildInitialDraft(sourceJob)),
-          ...patch,
-        };
-      })(),
-    }));
+    setJobDrafts((currentDrafts) => updateJobDraftState(batchJobs, currentDrafts, jobId, patch));
   };
 
   const handleRegenerate = async (job: JobRecord) => {
@@ -203,85 +230,23 @@ export const ArchivePage = () => {
     }
 
     try {
-      setError(null);
-      setSuccess(null);
-      setQueueingJobIds((currentIds) => [...currentIds, job.id]);
+      flushSync(() => {
+        setError(null);
+        setSuccess(null);
+        setQueueingJobIds((currentIds) => (currentIds.includes(job.id) ? currentIds : [...currentIds, job.id]));
+      });
 
       const updatedJob = await regenerateJob(job.id, {
         provider: draft.provider,
         prompt: draft.prompt.trim(),
       });
 
-      setJobs((currentJobs) => currentJobs.map((currentJob) => (currentJob.id === updatedJob.id ? updatedJob : currentJob)));
+      setBatchJobs((currentJobs) => currentJobs.map((currentJob) => (currentJob.id === updatedJob.id ? updatedJob : currentJob)));
       setSuccess(`La regeneración del trabajo #${job.id} quedó en cola.`);
     } catch (regenerateError) {
-      setError(getApiErrorMessage(regenerateError));
-    } finally {
       setQueueingJobIds((currentIds) => currentIds.filter((jobId) => jobId !== job.id));
+      setError(getApiErrorMessage(regenerateError));
     }
-  };
-
-  const goToSlide = (nextIndex: number) => {
-    const nextSlide = garmentSlides[nextIndex];
-
-    if (!nextSlide) {
-      return;
-    }
-
-    setSelectedGarmentKey(nextSlide.key);
-  };
-
-  const renderCarouselControls = () => {
-    if (!activeSlide) {
-      return null;
-    }
-
-    return (
-      <div className="evaluation-carousel-controls">
-        <CButton
-          color="secondary"
-          variant="outline"
-          disabled={activeSlideIndex <= 0}
-          onClick={() => goToSlide(activeSlideIndex - 1)}
-        >
-          Prenda anterior
-        </CButton>
-
-        <div className="evaluation-carousel-control-summary">
-          <div className="evaluation-carousel-control-thumbs">
-            {garmentSlides.map((slide, index) => (
-              <button
-                key={slide.key}
-                type="button"
-                className={`evaluation-carousel-control-thumb-button ${slide.key === activeSlide.key ? 'is-active' : ''}`}
-                onClick={() => goToSlide(index)}
-              >
-                <img
-                  className="evaluation-carousel-control-thumb"
-                  src={resolveAssetUrl(slide.garmentFilePath)}
-                  alt={slide.garmentName}
-                  loading="lazy"
-                />
-              </button>
-            ))}
-          </div>
-
-          <span>
-            Prenda {activeSlideIndex + 1} de {garmentSlides.length} · {activeSlide.jobs.length} pose
-            {activeSlide.jobs.length === 1 ? '' : 's'}
-          </span>
-        </div>
-
-        <CButton
-          color="secondary"
-          variant="outline"
-          disabled={activeSlideIndex >= garmentSlides.length - 1}
-          onClick={() => goToSlide(activeSlideIndex + 1)}
-        >
-          Siguiente prenda
-        </CButton>
-      </div>
-    );
   };
 
   return (
@@ -290,7 +255,7 @@ export const ArchivePage = () => {
         title="Archivo"
         description="Aquí se consulta el historial de trabajos realizados por cliente. La evaluación activa queda reservada solo al lote en curso."
         actions={
-          <CButton color="dark" variant="outline" onClick={() => void loadJobs()}>
+          <CButton color="dark" variant="outline" onClick={() => void handleRefresh()}>
             Actualizar
           </CButton>
         }
@@ -313,7 +278,7 @@ export const ArchivePage = () => {
             </div>
           </CCardHeader>
           <CCardBody>
-            {archiveClientOptions.length === 0 ? (
+            {archiveClients.length === 0 ? (
               <EmptyState
                 title="Todavía no hay trabajos archivados"
                 description="Cuando generes el primer lote, aparecerá aquí de inmediato organizado por cliente."
@@ -323,8 +288,14 @@ export const ArchivePage = () => {
                 <div className="archive-toolbar">
                   <div className="archive-filter">
                     <label className="form-label">Cliente</label>
-                    <CFormSelect value={selectedClientId} onChange={(event) => setSelectedClientId(event.target.value)}>
-                      {archiveClientOptions.map((client) => (
+                    <CFormSelect
+                      value={selectedClientId}
+                      onChange={(event) => {
+                        setSelectedClientId(event.target.value);
+                        setBatchPage(1);
+                      }}
+                    >
+                      {archiveClients.map((client) => (
                         <option key={client.id} value={client.id}>
                           {client.name}
                         </option>
@@ -334,15 +305,45 @@ export const ArchivePage = () => {
 
                   <div className="archive-filter">
                     <label className="form-label">Trabajo realizado</label>
-                    <CFormSelect value={selectedBatchId} onChange={(event) => setSelectedBatchId(event.target.value)}>
+                    <CFormSelect
+                      value={selectedBatchId}
+                      onChange={(event) => setSelectedBatchId(event.target.value)}
+                      disabled={loadingBatches || archiveBatches.length === 0}
+                    >
                       {archiveBatches.map((batch) => (
                         <option key={batch.batchId} value={batch.batchId}>
-                          {buildBatchLabel(batch)}
+                          {buildArchiveBatchLabel(batch)}
                         </option>
                       ))}
                     </CFormSelect>
                   </div>
                 </div>
+
+                {batchTotalPages > 1 ? (
+                  <div className="archive-actions">
+                    <CButton
+                      color="secondary"
+                      variant="outline"
+                      disabled={batchPage <= 1 || loadingBatches}
+                      onClick={() => setBatchPage((currentPage) => Math.max(1, currentPage - 1))}
+                    >
+                      Lotes anteriores
+                    </CButton>
+                    <div className="text-body-secondary small">
+                      Página {batchPage} de {batchTotalPages}
+                    </div>
+                    <CButton
+                      color="secondary"
+                      variant="outline"
+                      disabled={batchPage >= batchTotalPages || loadingBatches}
+                      onClick={() => setBatchPage((currentPage) => Math.min(batchTotalPages, currentPage + 1))}
+                    >
+                      Lotes siguientes
+                    </CButton>
+                  </div>
+                ) : null}
+
+                {loadingBatches ? <LoadingBlock /> : null}
 
                 {!selectedBatch ? (
                   <EmptyState
@@ -354,100 +355,53 @@ export const ArchivePage = () => {
                     <div className="evaluation-archive-summary">
                       <strong>{selectedBatch.clientName}</strong>
                       <span>
-                        {selectedBatch.modelName} · {selectedBatch.jobs.length} resultado
-                        {selectedBatch.jobs.length === 1 ? '' : 's'} · {formatBatchDate(selectedBatch.latestCreatedAt)}
+                        {selectedBatch.modelName} · {selectedBatch.totalJobs} resultado
+                        {selectedBatch.totalJobs === 1 ? '' : 's'} · {formatBatchDate(selectedBatch.latestCreatedAt)}
                       </span>
                     </div>
 
-                    {!activeSlide ? (
+                    {loadingBatchJobs ? (
+                      <LoadingBlock />
+                    ) : !activeSlide ? (
                       <EmptyState
                         title="No hay prendas para este trabajo"
                         description="Este lote archivado no tiene un agrupado de prendas disponible en este momento."
                       />
                     ) : (
                       <div className="evaluation-carousel-layout">
-                        {renderCarouselControls()}
+                        <GarmentCarouselControls
+                          activeSlideIndex={activeSlideIndex}
+                          slides={garmentSlides}
+                          onSelectSlide={goToSlide}
+                        />
 
                         <div className="evaluation-slide-grid">
-                          {activeSlide.jobs.map((job) => {
-                        const currentOutput = getCurrentOutput(job);
-                        const draft = jobDrafts[job.id] ?? buildInitialDraft(job);
-                        const queueing = queueingJobIds.includes(job.id);
-                        const isRegenerating = queueing || job.status === 'processing';
+                          {activeSlide.jobs.map((job, index) => {
+                            const draft = jobDrafts[job.id] ?? buildInitialDraft(job);
+                            const queueing = queueingJobIds.includes(job.id);
 
-                        return (
-                          <CCard key={job.id} className={`evaluation-card ${isRegenerating ? 'is-processing' : ''}`}>
-                            <CCardHeader className="evaluation-card-header">
-                              <div>
-                                <strong>{job.garmentName}</strong>
-                                <div className="text-body-secondary small">{job.modelName}</div>
-                              </div>
-                              <StatusBadge status={job.status} />
-                            </CCardHeader>
-
-                            <CCardBody>
-                              <div className="evaluation-card-content">
-                                <div className="evaluation-image-column">
-                                  {currentOutput ? (
-                                    <img
-                                      className="evaluation-main-image"
-                                      src={resolveAssetUrl(currentOutput.resultImage)}
-                                      alt={`Resultado archivado del trabajo ${job.id}`}
-                                      loading="lazy"
-                                    />
-                                  ) : (
-                                    <div className="empty-thumb evaluation-empty">Este trabajo no tiene una imagen final disponible.</div>
-                                  )}
-                                </div>
-
-                                <div className="evaluation-controls-column">
-                                  <div>
-                                    <label className="form-label">Modelo IA</label>
-                                    <CFormSelect
-                                      value={draft.provider}
-                                      onChange={(event) => updateJobDraft(job.id, { provider: event.target.value as ProviderKey })}
-                                    >
-                                      {providerOptions.map((provider) => (
-                                        <option key={provider.key} value={provider.key}>
-                                          {provider.label}
-                                        </option>
-                                      ))}
-                                    </CFormSelect>
-                                  </div>
-
-                                  <div>
-                                    <label className="form-label">Prompt editable</label>
-                                    <CFormTextarea
-                                      rows={7}
-                                      value={draft.prompt}
-                                      onChange={(event) => updateJobDraft(job.id, { prompt: event.target.value })}
-                                    />
-                                  </div>
-
-                                  <CButton
-                                    color="dark"
-                                    disabled={isRegenerating}
-                                    onClick={() => void handleRegenerate(job)}
-                                  >
-                                    {queueing ? 'Encolando...' : job.status === 'processing' ? 'Procesando...' : 'Regenerar foto'}
-                                  </CButton>
-                                </div>
-                              </div>
-                            </CCardBody>
-
-                            {isRegenerating ? (
-                              <div className="evaluation-card-overlay">
-                                <CSpinner color="secondary" />
-                                <strong>{queueing ? 'Encolando regeneración...' : 'Regenerando imagen...'}</strong>
-                                <span>Esta tarjeta se actualizará automáticamente cuando termine el proceso.</span>
-                              </div>
-                            ) : null}
-                          </CCard>
-                        );
+                            return (
+                              <JobEvaluationCard
+                                key={job.id}
+                                draft={draft}
+                                emptyMessage="Este trabajo no tiene una imagen final disponible."
+                                imageAlt={`Resultado archivado del trabajo ${job.id}`}
+                                job={job}
+                                queueing={queueing}
+                                subtitle={job.modelName}
+                                title={`Pose ${index + 1}`}
+                                onRegenerate={handleRegenerate}
+                                onUpdateDraft={updateJobDraft}
+                              />
+                            );
                           })}
                         </div>
 
-                        {renderCarouselControls()}
+                        <GarmentCarouselControls
+                          activeSlideIndex={activeSlideIndex}
+                          slides={garmentSlides}
+                          onSelectSlide={goToSlide}
+                        />
                       </div>
                     )}
 

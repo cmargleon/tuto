@@ -14,8 +14,8 @@ import { EmptyState } from '../components/EmptyState';
 import { ImageThumb } from '../components/ImageThumb';
 import { LoadingBlock } from '../components/LoadingBlock';
 import { PageHeader } from '../components/PageHeader';
-import { createModel, deleteModel, fetchClients, fetchModels, getApiErrorMessage, updateModel } from '../services/api';
-import type { ClientRecord, ModelRecord } from '../types/api';
+import { createModel, deleteModel, fetchClients, fetchModels, fetchStorageConfig, getApiErrorMessage, updateModel, uploadFilesToStorage } from '../services/api';
+import type { ClientRecord, ModelRecord, StorageConfig } from '../types/api';
 
 const formatClientDate = (value: string): string =>
   new Date(value).toLocaleDateString('es-MX', {
@@ -25,6 +25,7 @@ const formatClientDate = (value: string): string =>
 export const ModelsPage = () => {
   const [clients, setClients] = useState<ClientRecord[]>([]);
   const [models, setModels] = useState<ModelRecord[]>([]);
+  const [storageConfig, setStorageConfig] = useState<StorageConfig | null>(null);
   const [name, setName] = useState('');
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -43,9 +44,14 @@ export const ModelsPage = () => {
       setLoading(true);
       setError(null);
 
-      const [clientsResponse, modelsResponse] = await Promise.all([fetchClients(), fetchModels()]);
+      const [clientsResponse, modelsResponse, storageResponse] = await Promise.all([
+        fetchClients(),
+        fetchModels(),
+        fetchStorageConfig(),
+      ]);
       setClients(clientsResponse);
       setModels(modelsResponse);
+      setStorageConfig(storageResponse);
       setSelectedClientId((currentClientId) => {
         if (currentClientId && clientsResponse.some((client) => client.id === currentClientId)) {
           return currentClientId;
@@ -85,10 +91,16 @@ export const ModelsPage = () => {
       setSubmitting(true);
       setError(null);
       setSuccess(null);
+
+      const directUploadFiles = Array.from(files);
+      const uploadedImages =
+        storageConfig?.directUpload ? await uploadFilesToStorage('models', directUploadFiles) : undefined;
+
       await createModel({
         name,
         clientId: selectedClientId,
         files,
+        uploadedImages,
       });
       setName('');
       form.reset();

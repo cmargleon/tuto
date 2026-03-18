@@ -83,7 +83,7 @@ export class OpenAIImageProvider implements ImageProvider {
       const storedImage = await saveBase64Image(firstImage.b64_json, 'generated', 'png');
 
       return {
-        localFilePath: storedImage.publicPath,
+        localFilePath: storedImage.storagePath,
         remoteUrl: null,
         rawResponse: response.data,
         provider: this.provider,
@@ -94,7 +94,7 @@ export class OpenAIImageProvider implements ImageProvider {
       const storedImage = await downloadRemoteImage(firstImage.url, 'generated');
 
       return {
-        localFilePath: storedImage.publicPath,
+        localFilePath: storedImage.storagePath,
         remoteUrl: firstImage.url,
         rawResponse: response.data,
         provider: this.provider,

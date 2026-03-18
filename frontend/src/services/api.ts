@@ -1,13 +1,18 @@
 import axios from 'axios';
 import type {
   AspectRatioKey,
+  ArchiveClientSummary,
+  DirectUploadTarget,
   ClientRecord,
   GenerateJobsRequest,
   GenerateJobsResponse,
   JobRecord,
   ModelRecord,
+  PaginatedArchiveBatchResponse,
   ProviderOption,
   RegenerateJobRequest,
+  StorageConfig,
+  UploadedStorageFileRecord,
 } from '../types/api';
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
@@ -30,7 +35,7 @@ export const providerOptions: ProviderOption[] = [
   {
     key: 'openai-gpt-image-1.5',
     label: 'OpenAI gpt-image-1.5',
-    description: 'Flujo de edición de OpenAI con dos imágenes de referencia y almacenamiento local del resultado.',
+    description: 'Flujo de edición de OpenAI con dos imágenes de referencia y almacenamiento privado del resultado.',
   },
 ];
 
@@ -61,15 +66,22 @@ export const resolveAssetUrl = (filePath: string | null | undefined): string => 
     return filePath;
   }
 
+  const assetPath = `/api/assets?path=${encodeURIComponent(filePath)}`;
+
   if (!apiBaseUrl) {
-    return filePath;
+    return assetPath;
   }
 
-  return new URL(filePath, apiBaseUrl).toString();
+  return new URL(assetPath, apiBaseUrl).toString();
 };
 
 export const fetchModels = async (): Promise<ModelRecord[]> => {
   const response = await api.get<ModelRecord[]>('/api/models');
+  return response.data;
+};
+
+export const fetchStorageConfig = async (): Promise<StorageConfig> => {
+  const response = await api.get<StorageConfig>('/api/storage');
   return response.data;
 };
 
@@ -92,20 +104,36 @@ export const deleteClient = async (clientId: number): Promise<void> => {
   await api.delete(`/api/clients/${clientId}`);
 };
 
-export const createModel = async (input: { name: string; clientId: number; files: FileList | File[] }): Promise<ModelRecord> => {
-  const payload = new FormData();
-  payload.append('name', input.name);
-  payload.append('clientId', String(input.clientId));
+export const createModel = async (input: {
+  name: string;
+  clientId: number;
+  files?: FileList | File[];
+  uploadedImages?: UploadedStorageFileRecord[];
+}): Promise<ModelRecord> => {
+  let response;
 
-  Array.from(input.files).forEach((file) => {
-    payload.append('images', file);
-  });
+  if (input.uploadedImages && input.uploadedImages.length > 0) {
+    response = await api.post<ModelRecord>('/api/models', {
+      name: input.name,
+      clientId: input.clientId,
+      uploadedImages: input.uploadedImages,
+    });
+  } else {
+    const payload = new FormData();
+    payload.append('name', input.name);
+    payload.append('clientId', String(input.clientId));
 
-  const response = await api.post<ModelRecord>('/api/models', payload, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  });
+    Array.from(input.files ?? []).forEach((file) => {
+      payload.append('images', file);
+    });
+
+    response = await api.post<ModelRecord>('/api/models', payload, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  }
+
   return response.data;
 };
 
@@ -119,25 +147,40 @@ export const deleteModel = async (modelId: number): Promise<void> => {
 };
 
 export const generateJobs = async (input: GenerateJobsRequest): Promise<GenerateJobsResponse> => {
-  const payload = new FormData();
+  let response;
 
-  payload.append('clientId', String(input.clientId));
-  payload.append('modelId', String(input.modelId));
-  payload.append('poseImageIds', JSON.stringify(input.poseImageIds));
-  payload.append('aspectRatio', input.aspectRatio);
-  payload.append('provider', input.provider);
-  payload.append('prompt', input.prompt);
-  payload.append('backgroundConfig', JSON.stringify(input.backgroundConfig));
+  if (input.uploadedGarments && input.uploadedGarments.length > 0) {
+    response = await api.post<GenerateJobsResponse>('/api/generate', {
+      clientId: input.clientId,
+      modelId: input.modelId,
+      poseImageIds: input.poseImageIds,
+      aspectRatio: input.aspectRatio,
+      provider: input.provider,
+      prompt: input.prompt,
+      backgroundConfig: input.backgroundConfig,
+      uploadedGarments: input.uploadedGarments,
+    });
+  } else {
+    const payload = new FormData();
 
-  input.garments.forEach((garment) => {
-    payload.append('garments', garment);
-  });
+    payload.append('clientId', String(input.clientId));
+    payload.append('modelId', String(input.modelId));
+    payload.append('poseImageIds', JSON.stringify(input.poseImageIds));
+    payload.append('aspectRatio', input.aspectRatio);
+    payload.append('provider', input.provider);
+    payload.append('prompt', input.prompt);
+    payload.append('backgroundConfig', JSON.stringify(input.backgroundConfig));
 
-  const response = await api.post<GenerateJobsResponse>('/api/generate', payload, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  });
+    (input.garments ?? []).forEach((garment) => {
+      payload.append('garments', garment);
+    });
+
+    response = await api.post<GenerateJobsResponse>('/api/generate', payload, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  }
 
   return response.data;
 };
@@ -145,6 +188,78 @@ export const generateJobs = async (input: GenerateJobsRequest): Promise<Generate
 export const fetchJobs = async (): Promise<JobRecord[]> => {
   const response = await api.get<JobRecord[]>('/api/jobs');
   return response.data;
+};
+
+export const fetchCurrentJobs = async (): Promise<JobRecord[]> => {
+  const response = await api.get<JobRecord[]>('/api/jobs/current');
+  return response.data;
+};
+
+export const fetchArchiveClients = async (): Promise<ArchiveClientSummary[]> => {
+  const response = await api.get<ArchiveClientSummary[]>('/api/archive/clients');
+  return response.data;
+};
+
+export const fetchArchiveBatches = async (
+  clientId: number,
+  page = 1,
+  pageSize = 20,
+): Promise<PaginatedArchiveBatchResponse> => {
+  const response = await api.get<PaginatedArchiveBatchResponse>(`/api/archive/clients/${clientId}/batches`, {
+    params: {
+      page,
+      pageSize,
+    },
+  });
+
+  return response.data;
+};
+
+export const fetchArchiveBatchJobs = async (batchId: string): Promise<JobRecord[]> => {
+  const response = await api.get<JobRecord[]>(`/api/archive/batches/${encodeURIComponent(batchId)}`);
+  return response.data;
+};
+
+export const createPresignedUploads = async (
+  folder: 'models' | 'garments',
+  files: File[],
+): Promise<DirectUploadTarget[]> => {
+  const response = await api.post<{ uploads: DirectUploadTarget[] }>('/api/storage/presign', {
+    folder,
+    files: files.map((file) => ({
+      name: file.name,
+      contentType: file.type || 'application/octet-stream',
+    })),
+  });
+
+  return response.data.uploads;
+};
+
+export const uploadFilesToStorage = async (
+  folder: 'models' | 'garments',
+  files: File[],
+): Promise<UploadedStorageFileRecord[]> => {
+  const uploads = await createPresignedUploads(folder, files);
+
+  await Promise.all(
+    uploads.map(async (upload, index) => {
+      const file = files[index];
+      const response = await fetch(upload.uploadUrl, {
+        method: 'PUT',
+        headers: upload.headers,
+        body: file,
+      });
+
+      if (!response.ok) {
+        throw new Error(`No se pudo subir ${file.name} al storage privado.`);
+      }
+    }),
+  );
+
+  return uploads.map((upload, index) => ({
+    originalName: files[index]?.name ?? `archivo-${index + 1}`,
+    storagePath: upload.storagePath,
+  }));
 };
 
 export const regenerateJob = async (jobId: number, input: RegenerateJobRequest): Promise<JobRecord> => {

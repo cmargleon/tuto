@@ -1,8 +1,9 @@
 import { db } from '../db';
-import type { ModelImageRecord, ModelRecord } from '../types/domain';
+import type { ModelImageRecord, ModelRecord, UploadedStorageFileRecord } from '../types/domain';
 import { AppError } from '../utils/appError';
-import { toPublicUploadPath } from '../storage/fileStorage';
+import { deleteStoredFile } from '../storage/fileStorage';
 import { getClientById } from './clientService';
+import { cleanupStoragePaths, listStoragePathsForModelIds } from './storageCleanupService';
 
 interface DbModelRow {
   id: number;
@@ -55,7 +56,7 @@ export const getModelById = (modelId: number): ModelRecord | null => {
   }
 
   const imageRows = db
-    .prepare('SELECT id, model_id, file_path, created_at FROM model_images WHERE model_id = ? ORDER BY created_at DESC, id DESC')
+    .prepare('SELECT id, model_id, file_path, created_at FROM model_images WHERE model_id = ? ORDER BY created_at ASC, id ASC')
     .all(modelId) as DbModelImageRow[];
 
   return mapModel(modelRow, imageRows.map(mapModelImage));
@@ -76,7 +77,7 @@ export const listModels = (): ModelRecord[] => {
     `)
     .all() as DbModelRow[];
   const imageRows = db
-    .prepare('SELECT id, model_id, file_path, created_at FROM model_images ORDER BY created_at DESC, id DESC')
+    .prepare('SELECT id, model_id, file_path, created_at FROM model_images ORDER BY created_at ASC, id ASC')
     .all() as DbModelImageRow[];
 
   const imageMap = new Map<number, ModelImageRecord[]>();
@@ -93,7 +94,7 @@ export const listModels = (): ModelRecord[] => {
 interface CreateModelInput {
   clientId: number;
   name: string;
-  files: Express.Multer.File[];
+  images: UploadedStorageFileRecord[];
 }
 
 interface UpdateModelInput {
@@ -101,7 +102,7 @@ interface UpdateModelInput {
   name: string;
 }
 
-export const createModel = (input: CreateModelInput): ModelRecord => {
+export const createModel = async (input: CreateModelInput): Promise<ModelRecord> => {
   const trimmedName = input.name.trim();
 
   if (!trimmedName) {
@@ -112,7 +113,7 @@ export const createModel = (input: CreateModelInput): ModelRecord => {
     throw new AppError('Se requiere un cliente válido.');
   }
 
-  if (input.files.length === 0) {
+  if (input.images.length === 0) {
     throw new AppError('Debes subir al menos una imagen de pose antes de guardar el modelo.');
   }
 
@@ -123,16 +124,23 @@ export const createModel = (input: CreateModelInput): ModelRecord => {
   const insertModel = db.prepare('INSERT INTO models (client_id, name) VALUES (?, ?)');
   const insertImage = db.prepare('INSERT INTO model_images (model_id, file_path) VALUES (?, ?)');
 
-  const modelId = db.transaction(() => {
-    const result = insertModel.run(input.clientId, trimmedName);
-    const createdModelId = Number(result.lastInsertRowid);
+  let modelId: number;
 
-    input.files.forEach((file) => {
-      insertImage.run(createdModelId, toPublicUploadPath('models', file.filename));
-    });
+  try {
+    modelId = db.transaction(() => {
+      const result = insertModel.run(input.clientId, trimmedName);
+      const createdModelId = Number(result.lastInsertRowid);
 
-    return createdModelId;
-  })();
+      input.images.forEach((image) => {
+        insertImage.run(createdModelId, image.storagePath);
+      });
+
+      return createdModelId;
+    })();
+  } catch (error) {
+    await Promise.allSettled(input.images.map((image) => deleteStoredFile(image.storagePath)));
+    throw error;
+  }
 
   const model = getModelById(modelId);
 
@@ -175,12 +183,15 @@ export const updateModel = (modelId: number, input: UpdateModelInput): ModelReco
   return updatedModel;
 };
 
-export const deleteModel = (modelId: number): void => {
+export const deleteModel = async (modelId: number): Promise<void> => {
   const existingModel = getModelById(modelId);
 
   if (!existingModel) {
     throw new AppError('Modelo no encontrado.', 404);
   }
 
+  const storagePaths = listStoragePathsForModelIds([modelId]);
+
   db.prepare('DELETE FROM models WHERE id = ?').run(modelId);
+  await cleanupStoragePaths(storagePaths, `modelo ${modelId}`);
 };

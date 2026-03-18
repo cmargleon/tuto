@@ -16,7 +16,6 @@ import {
 } from '../ui';
 import { useNavigate } from 'react-router-dom';
 import { BackgroundStep } from '../components/background/BackgroundStep';
-import { BackgroundSummary } from '../components/background/BackgroundSummary';
 import { EmptyState } from '../components/EmptyState';
 import { ImageThumb } from '../components/ImageThumb';
 import { LoadingBlock } from '../components/LoadingBlock';
@@ -28,19 +27,20 @@ import {
   aspectRatioOptions,
   fetchClients,
   fetchModels,
+  fetchStorageConfig,
   generateJobs,
   getApiErrorMessage,
   providerOptions,
   resolveAssetUrl,
+  uploadFilesToStorage,
 } from '../services/api';
-import type { AspectRatioKey, ClientRecord, ModelRecord, ProviderKey } from '../types/api';
+import type { AspectRatioKey, ClientRecord, ModelRecord, ProviderKey, StorageConfig } from '../types/api';
 
 const steps = [
   'Cliente, modelo y poses',
   'Elegir prendas',
   'Fondo',
   'Elegir proveedor',
-  'Generar trabajos',
 ];
 
 interface UploadedGarment {
@@ -61,6 +61,7 @@ export const GenerateWizardPage = () => {
   const navigate = useNavigate();
   const [clients, setClients] = useState<ClientRecord[]>([]);
   const [models, setModels] = useState<ModelRecord[]>([]);
+  const [storageConfig, setStorageConfig] = useState<StorageConfig | null>(null);
   const previewUrlsRef = useRef<string[]>([]);
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
@@ -83,9 +84,14 @@ export const GenerateWizardPage = () => {
         setLoading(true);
         setError(null);
 
-        const [clientsResponse, modelsResponse] = await Promise.all([fetchClients(), fetchModels()]);
+        const [clientsResponse, modelsResponse, storageResponse] = await Promise.all([
+          fetchClients(),
+          fetchModels(),
+          fetchStorageConfig(),
+        ]);
         setClients(clientsResponse);
         setModels(modelsResponse);
+        setStorageConfig(storageResponse);
       } catch (loadError) {
         setError(getApiErrorMessage(loadError));
       } finally {
@@ -125,12 +131,8 @@ export const GenerateWizardPage = () => {
   );
 
   const totalJobs = selectedPoseIds.length * uploadedGarments.length;
-
-  const toggleId = (currentIds: number[], id: number) =>
-    currentIds.includes(id) ? currentIds.filter((currentId) => currentId !== id) : [...currentIds, id];
-
-  const canAdvance = () => {
-    switch (currentStep) {
+  const isStepComplete = (step: number) => {
+    switch (step) {
       case 1:
         return selectedClientId !== null && selectedModelId !== null && selectedPoseIds.length > 0;
       case 2:
@@ -140,8 +142,35 @@ export const GenerateWizardPage = () => {
       case 4:
         return selectedProvider !== null;
       default:
-        return true;
+        return false;
     }
+  };
+
+  const toggleId = (currentIds: number[], id: number) =>
+    currentIds.includes(id) ? currentIds.filter((currentId) => currentId !== id) : [...currentIds, id];
+
+  const canAdvance = () => isStepComplete(currentStep);
+
+  const canNavigateToStep = (targetStep: number) => {
+    if (targetStep <= currentStep) {
+      return true;
+    }
+
+    for (let step = 1; step < targetStep; step += 1) {
+      if (!isStepComplete(step)) {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  const handleStepSelect = (targetStep: number) => {
+    if (!canNavigateToStep(targetStep)) {
+      return;
+    }
+
+    setCurrentStep(targetStep);
   };
 
   const handleClientSelect = (clientId: number) => {
@@ -157,6 +186,17 @@ export const GenerateWizardPage = () => {
     setSelectedPoseIds([]);
     setModelMenuOpen(false);
     setSuccess(null);
+  };
+
+  const toggleAllSelectedPoses = () => {
+    if (!selectedModel) {
+      return;
+    }
+
+    const allPoseIds = selectedModel.images.map((image) => image.id);
+    const allSelected = allPoseIds.length > 0 && allPoseIds.every((imageId) => selectedPoseIds.includes(imageId));
+
+    setSelectedPoseIds(allSelected ? [] : allPoseIds);
   };
 
   const handleGarmentsUpload = (event: ChangeEvent<HTMLInputElement>) => {
@@ -202,11 +242,16 @@ export const GenerateWizardPage = () => {
       setError(null);
       setSuccess(null);
 
+      const garmentFiles = uploadedGarments.map((garment) => garment.file);
+      const uploadedGarmentsForRequest =
+        storageConfig?.directUpload ? await uploadFilesToStorage('garments', garmentFiles) : undefined;
+
       const response = await generateJobs({
         clientId: selectedClientId,
         modelId: selectedModelId,
         poseImageIds: selectedPoseIds,
-        garments: uploadedGarments.map((garment) => garment.file),
+        garments: garmentFiles,
+        uploadedGarments: uploadedGarmentsForRequest,
         aspectRatio: selectedAspectRatio,
         provider: selectedProvider,
         prompt,
@@ -231,7 +276,12 @@ export const GenerateWizardPage = () => {
 
       <CCard className="studio-card">
         <CCardHeader className="border-0 bg-transparent pt-4">
-          <WizardStepper currentStep={currentStep} steps={steps} />
+          <WizardStepper
+            currentStep={currentStep}
+            steps={steps}
+            onStepSelect={handleStepSelect}
+            canSelectStep={canNavigateToStep}
+          />
         </CCardHeader>
         <CCardBody>
           {loading ? <LoadingBlock /> : null}
@@ -386,6 +436,13 @@ export const GenerateWizardPage = () => {
                           Elige una o más poses de <strong>{selectedModel.name}</strong> para el cliente{' '}
                           <strong>{selectedClient?.name ?? 'seleccionado'}</strong>.
                         </div>
+                        <div className="d-flex justify-content-end">
+                          <CButton type="button" color="secondary" variant="outline" onClick={toggleAllSelectedPoses}>
+                            {selectedModel.images.length > 0 && selectedModel.images.every((image) => selectedPoseIds.includes(image.id))
+                              ? 'Deseleccionar todas las fotos'
+                              : 'Seleccionar todas las fotos'}
+                          </CButton>
+                        </div>
                         <div className="selection-grid">
                           {selectedModel.images.map((image) => (
                             <button
@@ -475,93 +532,53 @@ export const GenerateWizardPage = () => {
               ) : null}
 
               {currentStep === 4 ? (
-                <div className="d-grid gap-4">
-                  <CCard className="summary-card">
-                    <CCardBody>
-                      <CRow className="g-3 align-items-end">
-                        <CCol lg={4}>
-                          <CFormLabel htmlFor="aspect-ratio">Proporción de salida</CFormLabel>
-                          <CFormSelect
-                            id="aspect-ratio"
-                            value={selectedAspectRatio}
-                            onChange={(event) => setSelectedAspectRatio(event.target.value as AspectRatioKey)}
-                          >
-                            {aspectRatioOptions.map((option) => (
-                              <option key={option.key} value={option.key}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </CFormSelect>
-                        </CCol>
-
-                        <CCol lg={8}>
-                          <div className="text-body-secondary small">
-                            Esta proporción se aplicará a todo el lote. La predeterminada es <strong>9:16</strong>.
-                          </div>
-                        </CCol>
-                      </CRow>
-                    </CCardBody>
-                  </CCard>
-
-                  <div className="selection-grid provider-grid">
-                    {providerOptions.map((provider) => (
-                      <button
-                        key={provider.key}
-                        type="button"
-                        className={`selection-card provider-card ${selectedProvider === provider.key ? 'selected' : ''}`}
-                        onClick={() => setSelectedProvider(provider.key)}
-                      >
-                        <div className="d-flex justify-content-between align-items-start mb-3">
-                          <strong>{provider.label}</strong>
-                          <CFormCheck readOnly checked={selectedProvider === provider.key} />
-                        </div>
-                        <p className="mb-0 text-body-secondary">{provider.description}</p>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
-              {currentStep === 5 ? (
                 <CRow className="g-4">
                   <CCol lg={7}>
-                    <CCard className="summary-card">
-                      <CCardBody>
-                        <h4 className="mb-3">Resumen de generación</h4>
-                        <div className="summary-line">
-                          <span>Cliente</span>
-                          <strong>{selectedClient?.name ?? '-'}</strong>
-                        </div>
-                        <div className="summary-line">
-                          <span>Modelo</span>
-                          <strong>{selectedModel?.name ?? '-'}</strong>
-                        </div>
-                        <div className="summary-line">
-                          <span>Poses seleccionadas</span>
-                          <strong>{selectedPoseIds.length}</strong>
-                        </div>
-                        <div className="summary-line">
-                          <span>Prendas seleccionadas</span>
-                          <strong>{uploadedGarments.length}</strong>
-                        </div>
-                        <div className="summary-line">
-                          <span>Proporción de salida</span>
-                          <strong>{selectedAspectRatio}</strong>
-                        </div>
-                        <div className="summary-line">
-                          <span>Fondo</span>
-                          <strong>Editado</strong>
-                        </div>
-                        <div className="summary-line">
-                          <span>Proveedor</span>
-                          <strong>{providerOptions.find((provider) => provider.key === selectedProvider)?.label ?? '-'}</strong>
-                        </div>
-                        <div className="summary-line total-line">
-                          <span>Total de trabajos</span>
-                          <strong>{totalJobs}</strong>
-                        </div>
-                      </CCardBody>
-                    </CCard>
+                    <div className="d-grid gap-4">
+                      <CCard className="summary-card">
+                        <CCardBody>
+                          <CRow className="g-3 align-items-end">
+                            <CCol lg={4}>
+                              <CFormLabel htmlFor="aspect-ratio">Proporción de salida</CFormLabel>
+                              <CFormSelect
+                                id="aspect-ratio"
+                                value={selectedAspectRatio}
+                                onChange={(event) => setSelectedAspectRatio(event.target.value as AspectRatioKey)}
+                              >
+                                {aspectRatioOptions.map((option) => (
+                                  <option key={option.key} value={option.key}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </CFormSelect>
+                            </CCol>
+
+                            <CCol lg={8}>
+                              <div className="text-body-secondary small">
+                                Esta proporción se aplicará a todo el lote. La predeterminada es <strong>9:16</strong>.
+                              </div>
+                            </CCol>
+                          </CRow>
+                        </CCardBody>
+                      </CCard>
+
+                      <div className="selection-grid provider-grid">
+                        {providerOptions.map((provider) => (
+                          <button
+                            key={provider.key}
+                            type="button"
+                            className={`selection-card provider-card ${selectedProvider === provider.key ? 'selected' : ''}`}
+                            onClick={() => setSelectedProvider(provider.key)}
+                          >
+                            <div className="d-flex justify-content-between align-items-start mb-3">
+                              <strong>{provider.label}</strong>
+                              <CFormCheck readOnly checked={selectedProvider === provider.key} />
+                            </div>
+                            <p className="mb-0 text-body-secondary">{provider.description}</p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </CCol>
 
                   <CCol lg={5}>
@@ -575,7 +592,6 @@ export const GenerateWizardPage = () => {
                           </p>
                         </CCardBody>
                       </CCard>
-                      <BackgroundSummary config={normalizeBackgroundConfig(backgroundConfig)} title="Resumen de fondo seleccionado" />
                     </div>
                   </CCol>
                 </CRow>
@@ -602,7 +618,12 @@ export const GenerateWizardPage = () => {
                     Continuar
                   </CButton>
                 ) : (
-                  <CButton type="button" color="dark" disabled={submitting || totalJobs === 0} onClick={() => void handleGenerate()}>
+                  <CButton
+                    type="button"
+                    color="dark"
+                    disabled={submitting || totalJobs === 0 || selectedProvider === null}
+                    onClick={() => void handleGenerate()}
+                  >
                     {submitting ? 'Generando trabajos...' : `Crear ${totalJobs} trabajos`}
                   </CButton>
                 )}

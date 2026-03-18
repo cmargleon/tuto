@@ -62,4 +62,12 @@ CREATE TABLE IF NOT EXISTS job_logs (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_models_client_id ON models(client_id);
+CREATE INDEX IF NOT EXISTS idx_model_images_model_id_created ON model_images(model_id, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_jobs_batch_id ON jobs(batch_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_model_id ON jobs(model_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_status_priority_created ON jobs(status, queue_priority DESC, created_at ASC, id ASC);
+CREATE INDEX IF NOT EXISTS idx_job_outputs_job_id_created ON job_outputs(job_id, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_job_logs_job_id ON job_logs(job_id);
 `;

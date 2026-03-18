@@ -1,10 +1,14 @@
 import type { RequestHandler } from 'express';
-import { listJobs, queueJobRegeneration } from '../services/jobService';
+import { listCurrentJobs, listJobs, queueJobRegeneration } from '../services/jobService';
 import { AppError } from '../utils/appError';
 import { isProviderKey } from '../utils/providerCatalog';
 
 export const getJobs: RequestHandler = (_req, res) => {
   res.json(listJobs());
+};
+
+export const getCurrentJobs: RequestHandler = (_req, res) => {
+  res.json(listCurrentJobs());
 };
 
 export const postRegenerateJob: RequestHandler = (req, res) => {

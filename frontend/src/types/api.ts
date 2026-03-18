@@ -27,6 +27,11 @@ export interface ClientRecord {
   createdAt: string;
 }
 
+export interface UploadedStorageFileRecord {
+  originalName: string;
+  storagePath: string;
+}
+
 export interface JobOutputRecord {
   id: number;
   jobId: number;
@@ -62,7 +67,8 @@ export interface GenerateJobsRequest {
   clientId: number;
   modelId: number;
   poseImageIds: number[];
-  garments: File[];
+  garments?: File[];
+  uploadedGarments?: UploadedStorageFileRecord[];
   aspectRatio: AspectRatioKey;
   provider: ProviderKey;
   prompt: string;
@@ -82,4 +88,42 @@ export interface ProviderOption {
   key: ProviderKey;
   label: string;
   description: string;
+}
+
+export interface StorageConfig {
+  directUpload: boolean;
+  driver: 'local' | 's3';
+  maxFileSizeMb: number;
+}
+
+export interface DirectUploadTarget {
+  headers: Record<string, string>;
+  storagePath: string;
+  uploadUrl: string;
+}
+
+export interface ArchiveClientSummary {
+  batchCount: number;
+  id: number;
+  lastBatchCreatedAt: string;
+  name: string;
+}
+
+export interface ArchiveBatchSummary {
+  batchId: string;
+  clientId: number | null;
+  clientName: string;
+  completedImages: number;
+  latestCreatedAt: string;
+  latestJobId: number;
+  modelName: string;
+  totalJobs: number;
+}
+
+export interface PaginatedArchiveBatchResponse {
+  items: ArchiveBatchSummary[];
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
 }

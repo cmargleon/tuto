@@ -65,7 +65,7 @@ export abstract class BaseFalProvider implements ImageProvider {
     const storedImage = await downloadRemoteImage(remoteUrl, 'generated');
 
     return {
-      localFilePath: storedImage.publicPath,
+      localFilePath: storedImage.storagePath,
       remoteUrl,
       rawResponse: response.data,
       provider: this.provider,

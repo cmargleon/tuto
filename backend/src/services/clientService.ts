@@ -1,6 +1,7 @@
 import { db } from '../db';
 import type { ClientRecord } from '../types/domain';
 import { AppError } from '../utils/appError';
+import { cleanupStoragePaths, listModelIdsForClient, listStoragePathsForModelIds } from './storageCleanupService';
 
 interface DbClientRow {
   id: number;
@@ -65,12 +66,16 @@ export const updateClient = (clientId: number, name: string): ClientRecord => {
   return updatedClient;
 };
 
-export const deleteClient = (clientId: number): void => {
+export const deleteClient = async (clientId: number): Promise<void> => {
   const existingClient = getClientById(clientId);
 
   if (!existingClient) {
     throw new AppError('Cliente no encontrado.', 404);
   }
 
+  const modelIds = listModelIdsForClient(clientId);
+  const storagePaths = listStoragePathsForModelIds(modelIds);
+
   db.prepare('DELETE FROM clients WHERE id = ?').run(clientId);
+  await cleanupStoragePaths(storagePaths, `cliente ${clientId}`);
 };

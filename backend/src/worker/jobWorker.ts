@@ -1,5 +1,5 @@
 import { buildGenerationPrompt } from '../background/promptBuilders';
-import { publicUploadPathToAbsolutePath } from '../storage/fileStorage';
+import { materializeStoredFile } from '../storage/fileStorage';
 import { getImageProvider } from '../providers/providerFactory';
 import { addJobLog, claimNextPendingJob, completeJob, failJob, requeueProcessingJobs } from '../services/jobService';
 
@@ -47,31 +47,50 @@ const processNextJob = async (): Promise<void> => {
   try {
     const provider = getImageProvider(job.provider);
     const finalPrompt = buildGenerationPrompt(job.prompt, job.backgroundConfig);
-    const result = await provider.generate({
-      poseImagePath: publicUploadPathToAbsolutePath(job.poseImagePath),
-      garmentImagePath: publicUploadPathToAbsolutePath(job.garmentFilePath),
-      prompt: finalPrompt,
-      aspectRatio: job.aspectRatio,
-    });
+    let poseImage: Awaited<ReturnType<typeof materializeStoredFile>> | null = null;
+    let garmentImage: Awaited<ReturnType<typeof materializeStoredFile>> | null = null;
 
-    const outputId = completeJob(job.id, {
-      provider: result.provider,
-      prompt: finalPrompt,
-      resultImage: result.localFilePath,
-    });
-
-    addJobLog(
-      job.id,
-      {
-        provider: result.provider,
+    try {
+      poseImage = await materializeStoredFile(job.poseImagePath);
+      garmentImage = await materializeStoredFile(job.garmentFilePath);
+      const result = await provider.generate({
+        poseImagePath: poseImage.localPath,
+        garmentImagePath: garmentImage.localPath,
+        prompt: finalPrompt,
         aspectRatio: job.aspectRatio,
-        backgroundConfig: job.backgroundConfig,
-        finalPrompt,
-        remoteUrl: result.remoteUrl,
-        rawResponse: result.rawResponse,
-      },
-      outputId,
-    );
+      });
+
+      const outputId = await completeJob(job.id, {
+        provider: result.provider,
+        prompt: finalPrompt,
+        resultImage: result.localFilePath,
+      });
+
+      addJobLog(
+        job.id,
+        {
+          provider: result.provider,
+          aspectRatio: job.aspectRatio,
+          backgroundConfig: job.backgroundConfig,
+          finalPrompt,
+          remoteUrl: result.remoteUrl,
+          rawResponse: result.rawResponse,
+        },
+        outputId,
+      );
+    } finally {
+      const cleanupTasks: Array<Promise<void>> = [];
+
+      if (poseImage) {
+        cleanupTasks.push(poseImage.cleanup());
+      }
+
+      if (garmentImage) {
+        cleanupTasks.push(garmentImage.cleanup());
+      }
+
+      await Promise.allSettled(cleanupTasks);
+    }
   } catch (error) {
     failJob(job.id);
     addJobLog(job.id, {

@@ -22,13 +22,13 @@ export const putClient: RequestHandler = (req, res) => {
   res.json(client);
 };
 
-export const deleteClientById: RequestHandler = (req, res) => {
+export const deleteClientById: RequestHandler = async (req, res) => {
   const clientId = Number(req.params.id);
 
   if (!Number.isInteger(clientId)) {
     throw new AppError('Id de cliente inválido.');
   }
 
-  deleteClient(clientId);
+  await deleteClient(clientId);
   res.status(204).send();
 };
