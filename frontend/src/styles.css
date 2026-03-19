@@ -297,6 +297,37 @@ p {
   background: #0f172a;
 }
 
+.evaluation-image-wrapper {
+  position: relative;
+}
+
+.evaluation-download-btn {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
+  text-decoration: none;
+}
+
+.evaluation-image-wrapper:hover .evaluation-download-btn {
+  opacity: 0.5;
+}
+
+.evaluation-download-btn:hover {
+  opacity: 0.8 !important;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+}
+
 .image-thumb {
   aspect-ratio: 3 / 4;
   object-fit: cover;

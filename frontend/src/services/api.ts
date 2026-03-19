@@ -193,6 +193,7 @@ export const generateJobs = async (input: GenerateJobsRequest): Promise<Generate
       prompt: input.prompt,
       backgroundConfig: input.backgroundConfig,
       uploadedGarments: input.uploadedGarments,
+      garmentIsMultiAngle: input.garmentIsMultiAngle ?? [],
     });
   } else {
     const payload = new FormData();
@@ -204,6 +205,7 @@ export const generateJobs = async (input: GenerateJobsRequest): Promise<Generate
     payload.append('provider', input.provider);
     payload.append('prompt', input.prompt);
     payload.append('backgroundConfig', JSON.stringify(input.backgroundConfig));
+    payload.append('garmentIsMultiAngle', JSON.stringify(input.garmentIsMultiAngle ?? []));
 
     (input.garments ?? []).forEach((garment) => {
       payload.append('garments', garment);

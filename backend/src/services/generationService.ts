@@ -65,7 +65,7 @@ export const createGenerationJobs = (input: GenerateJobsInput): { createdJobs: n
     );
   }
 
-  const prompt = input.prompt.trim() || defaultTryOnPrompt;
+  const basePrompt = input.prompt.trim() || defaultTryOnPrompt;
   const backgroundConfig = normalizeBackgroundConfig(input.backgroundConfig);
   const batchId = `batch-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const insertJob = db.prepare(`
@@ -77,6 +77,10 @@ export const createGenerationJobs = (input: GenerateJobsInput): { createdJobs: n
     let createdJobs = 0;
 
     input.garments.forEach((garment) => {
+      const jobPrompt = garment.isMultiAngle
+        ? `${basePrompt}\nThe garment is shown from multiple angles in a single image.`
+        : basePrompt;
+
       uniquePoseIds.forEach((poseImageId) => {
         insertJob.run(
           batchId,
@@ -88,7 +92,7 @@ export const createGenerationJobs = (input: GenerateJobsInput): { createdJobs: n
           garment.filePath,
           input.aspectRatio,
           input.provider,
-          prompt,
+          jobPrompt,
           JSON.stringify(backgroundConfig),
           model.name,
         );

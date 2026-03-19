@@ -32,6 +32,7 @@ export const isAspectRatioKey = (value: unknown): value is AspectRatioKey =>
 export interface GarmentUploadRecord {
   name: string;
   filePath: string;
+  isMultiAngle: boolean;
 }
 
 export interface JobProcessingRecord {

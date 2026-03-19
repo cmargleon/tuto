@@ -4,14 +4,15 @@ import { JobBatchCarousel } from '../components/evaluation/JobBatchCarousel';
 import { EmptyState } from '../components/EmptyState';
 import { LoadingBlock } from '../components/LoadingBlock';
 import { PageHeader } from '../components/PageHeader';
-import { fetchCurrentJobs, getApiErrorMessage } from '../services/api';
-import { buildBatchLabel, buildJobBatches } from '../features/jobs/jobBatches';
+import { fetchCurrentJobs, getApiErrorMessage, resolveProxyAssetUrl } from '../services/api';
+import { buildBatchLabel, buildJobBatches, downloadBatchImages } from '../features/jobs/jobBatches';
 import { useJobRegeneration } from '../features/jobs/useJobRegeneration';
 import type { JobRecord } from '../types/api';
 
 export const JobsPage = () => {
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -39,6 +40,28 @@ export const JobsPage = () => {
 
   const batches = useMemo(() => buildJobBatches(jobs), [jobs]);
   const currentBatch = batches[0] ?? null;
+
+  const handleDownload = async () => {
+    if (!currentBatch) return;
+
+    try {
+      setError(null);
+      setSuccess(null);
+      setDownloading(true);
+
+      const downloadedCount = await downloadBatchImages(currentBatch, resolveProxyAssetUrl);
+
+      if (downloadedCount === 0) {
+        setError('Este lote no tiene imágenes completadas para descargar.');
+      } else {
+        setSuccess(`Se descargaron ${downloadedCount} imagen${downloadedCount === 1 ? '' : 'es'}.`);
+      }
+    } catch (downloadError) {
+      setError(getApiErrorMessage(downloadError));
+    } finally {
+      setDownloading(false);
+    }
+  };
   const { jobDrafts, queueingJobIds, regenerateJobWithDraft, updateJobDraft } = useJobRegeneration({
     jobs,
     onError: setError,
@@ -103,22 +126,38 @@ export const JobsPage = () => {
                 description="Actualiza la página para volver a cargar el último lote disponible."
               />
             ) : (
-              <JobBatchCarousel
-                emptyDescription="Este lote no tiene un agrupado de prendas válido en este momento."
-                emptyTitle="No hay prendas para mostrar"
-                getEmptyMessage={(job) =>
-                  job.status === 'failed'
-                    ? 'La generación falló. Ajusta el prompt o el proveedor e inténtalo otra vez.'
-                    : 'Todavía no hay una imagen generada para esta pose.'
-                }
-                jobDrafts={jobDrafts}
-                jobs={currentBatch.jobs}
-                queueingJobIds={queueingJobIds}
-                showFloatingGarment
-                showProcessingHint
-                onRegenerate={regenerateJobWithDraft}
-                onUpdateDraft={updateJobDraft}
-              />
+              <div className={`evaluation-panel-stack${currentBatch.jobs.every((j) => j.status === 'completed' || j.status === 'failed') && currentBatch.jobs.some((j) => j.status === 'completed') ? ' evaluation-panel-stack-with-floating-action' : ''}`}>
+                <JobBatchCarousel
+                  emptyDescription="Este lote no tiene un agrupado de prendas válido en este momento."
+                  emptyTitle="No hay prendas para mostrar"
+                  getEmptyMessage={(job) =>
+                    job.status === 'failed'
+                      ? 'La generación falló. Ajusta el prompt o el proveedor e inténtalo otra vez.'
+                      : 'Todavía no hay una imagen generada para esta pose.'
+                  }
+                  jobDrafts={jobDrafts}
+                  jobs={currentBatch.jobs}
+                  queueingJobIds={queueingJobIds}
+                  showFloatingGarment
+                  showProcessingHint
+                  onRegenerate={regenerateJobWithDraft}
+                  onUpdateDraft={updateJobDraft}
+                />
+
+                {currentBatch.jobs.every((j) => j.status === 'completed' || j.status === 'failed') &&
+                currentBatch.jobs.some((j) => j.status === 'completed') ? (
+                  <div className="archive-floating-actions">
+                    <CButton
+                      className="archive-floating-button"
+                      color="dark"
+                      disabled={downloading}
+                      onClick={() => void handleDownload()}
+                    >
+                      {downloading ? 'Guardando imágenes...' : 'Guardar todas las imágenes'}
+                    </CButton>
+                  </div>
+                ) : null}
+              </div>
             )}
           </CCardBody>
         </CCard>

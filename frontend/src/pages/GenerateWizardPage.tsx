@@ -15,7 +15,6 @@ import {
   CRow,
 } from '../ui';
 import { useNavigate } from 'react-router-dom';
-import { BackgroundStep } from '../components/background/BackgroundStep';
 import { EmptyState } from '../components/EmptyState';
 import { ImageThumb } from '../components/ImageThumb';
 import { LoadingBlock } from '../components/LoadingBlock';
@@ -23,6 +22,8 @@ import { PageHeader } from '../components/PageHeader';
 import { WizardStepper } from '../components/WizardStepper';
 import { DEFAULT_TRY_ON_PROMPT } from '../constants/tryOn';
 import { defaultBackgroundConfig, normalizeBackgroundConfig } from '../features/background/backgroundConfig';
+// backgroundConfig is kept with its default value — the UI step was removed
+import { compositeGarmentImages, groupFilesBySubfolder } from '../features/garments/compositeGarmentImages';
 import { uploadFilesToStorage } from '../features/storage/uploadFilesToStorage';
 import {
   aspectRatioOptions,
@@ -39,15 +40,14 @@ import type { AspectRatioKey, ClientRecord, ModelRecord, ProviderKey, StorageCon
 const steps = [
   'Cliente, modelo y poses',
   'Elegir prendas',
-  'Fondo',
   'Elegir proveedor',
 ];
 
 interface UploadedGarment {
   id: string;
-  file: File;
+  files: File[];
   name: string;
-  previewUrl: string;
+  previewUrls: string[];
 }
 
 const buildGarmentName = (filename: string): string => filename.replace(/\.[^.]+$/, '') || filename;
@@ -68,9 +68,9 @@ export const GenerateWizardPage = () => {
   const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
   const [selectedPoseIds, setSelectedPoseIds] = useState<number[]>([]);
   const [uploadedGarments, setUploadedGarments] = useState<UploadedGarment[]>([]);
-  const [backgroundConfig, setBackgroundConfig] = useState(defaultBackgroundConfig);
-  const [selectedAspectRatio, setSelectedAspectRatio] = useState<AspectRatioKey>('9:16');
-  const [selectedProvider, setSelectedProvider] = useState<ProviderKey | null>(null);
+  const backgroundConfig = defaultBackgroundConfig;
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState<AspectRatioKey>('3:4');
+  const [selectedProvider, setSelectedProvider] = useState<ProviderKey | null>('fal-seedream');
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [prompt, setPrompt] = useState(DEFAULT_TRY_ON_PROMPT);
   const [loading, setLoading] = useState(true);
@@ -103,7 +103,7 @@ export const GenerateWizardPage = () => {
   }, []);
 
   useEffect(() => {
-    previewUrlsRef.current = uploadedGarments.map((garment) => garment.previewUrl);
+    previewUrlsRef.current = uploadedGarments.flatMap((garment) => garment.previewUrls);
   }, [uploadedGarments]);
 
   useEffect(
@@ -138,8 +138,6 @@ export const GenerateWizardPage = () => {
       case 2:
         return uploadedGarments.length > 0;
       case 3:
-        return true;
-      case 4:
         return selectedProvider !== null;
       default:
         return false;
@@ -200,7 +198,7 @@ export const GenerateWizardPage = () => {
   };
 
   const handleGarmentsUpload = (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []);
+    const files = Array.from(event.target.files ?? []).filter((f) => f.type.startsWith('image/'));
 
     if (files.length === 0) {
       return;
@@ -210,9 +208,35 @@ export const GenerateWizardPage = () => {
       ...currentGarments,
       ...files.map((file) => ({
         id: crypto.randomUUID(),
-        file,
+        files: [file],
         name: buildGarmentName(file.name),
-        previewUrl: URL.createObjectURL(file),
+        previewUrls: [URL.createObjectURL(file)],
+      })),
+    ]);
+    setSuccess(null);
+    event.target.value = '';
+  };
+
+  const handleFolderUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const allFiles = Array.from(event.target.files ?? []);
+
+    if (allFiles.length === 0) {
+      return;
+    }
+
+    const groups = groupFilesBySubfolder(allFiles);
+
+    if (groups.length === 0) {
+      return;
+    }
+
+    setUploadedGarments((currentGarments) => [
+      ...currentGarments,
+      ...groups.map(({ name, files: groupFiles }) => ({
+        id: crypto.randomUUID(),
+        files: groupFiles,
+        name,
+        previewUrls: groupFiles.map((f) => URL.createObjectURL(f)),
       })),
     ]);
     setSuccess(null);
@@ -224,7 +248,7 @@ export const GenerateWizardPage = () => {
       const garmentToRemove = currentGarments.find((garment) => garment.id === garmentId);
 
       if (garmentToRemove) {
-        URL.revokeObjectURL(garmentToRemove.previewUrl);
+        garmentToRemove.previewUrls.forEach((url) => URL.revokeObjectURL(url));
       }
 
       return currentGarments.filter((garment) => garment.id !== garmentId);
@@ -242,15 +266,17 @@ export const GenerateWizardPage = () => {
       setError(null);
       setSuccess(null);
 
-      const garmentFiles = uploadedGarments.map((garment) => garment.file);
-      const uploadedGarmentsForRequest = await uploadFilesToStorage(storageConfig, 'garments', garmentFiles);
+      const garmentIsMultiAngle = uploadedGarments.map((g) => g.files.length > 1);
+      const compositeFiles = await Promise.all(uploadedGarments.map((g) => compositeGarmentImages(g.files)));
+      const uploadedGarmentsForRequest = await uploadFilesToStorage(storageConfig, 'garments', compositeFiles);
 
       const response = await generateJobs({
         clientId: selectedClientId,
         modelId: selectedModelId,
         poseImageIds: selectedPoseIds,
-        garments: garmentFiles,
+        garments: compositeFiles,
         uploadedGarments: uploadedGarmentsForRequest,
+        garmentIsMultiAngle,
         aspectRatio: selectedAspectRatio,
         provider: selectedProvider,
         prompt,
@@ -479,20 +505,38 @@ export const GenerateWizardPage = () => {
                     </p>
                   </div>
 
-                  <CFormLabel htmlFor="garment-upload" className="upload-dropzone">
-                    <span className="upload-dropzone-title">Seleccionar varias imágenes de prendas</span>
-                    <span className="upload-dropzone-copy">
-                      Sube una o muchas prendas. Cada prenda se combinará con cada pose seleccionada.
-                    </span>
-                    <CFormInput
-                      id="garment-upload"
-                      type="file"
-                      multiple
-                      accept="image/*"
-                      className="d-none"
-                      onChange={handleGarmentsUpload}
-                    />
-                  </CFormLabel>
+                  <div className="d-flex gap-3">
+                    <CFormLabel htmlFor="garment-upload" className="upload-dropzone" style={{ flex: 1 }}>
+                      <span className="upload-dropzone-title">Agregar imágenes individuales</span>
+                      <span className="upload-dropzone-copy">
+                        Cada archivo = una prenda con una sola foto de referencia.
+                      </span>
+                      <CFormInput
+                        id="garment-upload"
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        className="d-none"
+                        onChange={handleGarmentsUpload}
+                      />
+                    </CFormLabel>
+
+                    <CFormLabel htmlFor="folder-upload" className="upload-dropzone" style={{ flex: 1 }}>
+                      <span className="upload-dropzone-title">Agregar desde carpeta</span>
+                      <span className="upload-dropzone-copy">
+                        Cada subcarpeta = una prenda. Las fotos dentro se combinarán en una sola imagen de referencia.
+                      </span>
+                      <CFormInput
+                        id="folder-upload"
+                        type="file"
+                        className="d-none"
+                        onChange={handleFolderUpload}
+                        // @ts-expect-error webkitdirectory is not in React's types
+                        webkitdirectory=""
+                        directory=""
+                      />
+                    </CFormLabel>
+                  </div>
 
                   {uploadedGarments.length === 0 ? (
                     <EmptyState
@@ -506,7 +550,11 @@ export const GenerateWizardPage = () => {
                           <div className="d-flex justify-content-between align-items-start mb-3 gap-3">
                             <div>
                               <strong>{garment.name}</strong>
-                              <div className="text-body-secondary small">{garment.file.name}</div>
+                              <div className="text-body-secondary small">
+                                {garment.files.length === 1
+                                  ? garment.files[0].name
+                                  : `${garment.files.length} fotos · imagen compuesta`}
+                              </div>
                             </div>
                             <CButton
                               type="button"
@@ -518,7 +566,21 @@ export const GenerateWizardPage = () => {
                               Quitar
                             </CButton>
                           </div>
-                          <img className="image-thumb" src={garment.previewUrl} alt={garment.name} loading="lazy" />
+                          {garment.previewUrls.length === 1 ? (
+                            <img className="image-thumb" src={garment.previewUrls[0]} alt={garment.name} loading="lazy" />
+                          ) : (
+                            <div className="d-flex gap-1 overflow-hidden" style={{ borderRadius: '6px' }}>
+                              {garment.previewUrls.map((url, i) => (
+                                <img
+                                  key={url}
+                                  src={url}
+                                  alt={`Vista ${i + 1}`}
+                                  loading="lazy"
+                                  style={{ flex: 1, minWidth: 0, height: '120px', objectFit: 'cover' }}
+                                />
+                              ))}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -527,10 +589,6 @@ export const GenerateWizardPage = () => {
               ) : null}
 
               {currentStep === 3 ? (
-                <BackgroundStep value={backgroundConfig} onChange={setBackgroundConfig} />
-              ) : null}
-
-              {currentStep === 4 ? (
                 <CRow className="g-4">
                   <CCol lg={7}>
                     <div className="d-grid gap-4">
@@ -554,7 +612,7 @@ export const GenerateWizardPage = () => {
 
                             <CCol lg={8}>
                               <div className="text-body-secondary small">
-                                Esta proporción se aplicará a todo el lote. La predeterminada es <strong>9:16</strong>.
+                                Esta proporción se aplicará a todo el lote. La predeterminada es <strong>3:4</strong>.
                               </div>
                             </CCol>
                           </CRow>

@@ -36,6 +36,7 @@ export interface GenerateJobsRequest {
   poseImageIds: number[];
   garments?: File[];
   uploadedGarments?: UploadedStorageFileRecord[];
+  garmentIsMultiAngle?: boolean[];
   aspectRatio: AspectRatioKey;
   provider: ProviderKey;
   prompt: string;

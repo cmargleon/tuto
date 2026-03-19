@@ -6,6 +6,23 @@ import { defaultAspectRatio, isAspectRatioKey, type ProviderKey } from '../types
 import { cleanupUploadedStorageFiles, normalizeUploadedStorageFiles } from '../utils/uploadedStorageFiles';
 import { AppError } from '../utils/appError';
 
+const parseBooleanArray = (value: unknown): boolean[] => {
+  if (Array.isArray(value)) {
+    return value.map(Boolean);
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return Array.isArray(parsed) ? parsed.map(Boolean) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
+};
+
 const parseNumericArray = (value: unknown): number[] => {
   if (Array.isArray(value)) {
     return value.map(Number);
@@ -34,6 +51,7 @@ export const postGenerate: RequestHandler = async (req, res) => {
   const aspectRatio = String(req.body.aspectRatio ?? defaultAspectRatio);
   const prompt = String(req.body.prompt ?? '');
   const backgroundConfig = parseBackgroundConfig(req.body.backgroundConfig);
+  const garmentIsMultiAngle = parseBooleanArray(req.body.garmentIsMultiAngle);
   const files = Array.isArray(req.files) ? req.files : [];
   const uploadedGarments = await normalizeUploadedStorageFiles({
     files,
@@ -77,6 +95,7 @@ export const postGenerate: RequestHandler = async (req, res) => {
       garments: uploadedGarments.map((garment, index) => ({
         name: path.parse(garment.originalName).name || `Prenda ${index + 1}`,
         filePath: garment.storagePath,
+        isMultiAngle: garmentIsMultiAngle[index] ?? false,
       })),
     });
   } catch (error) {
