@@ -4,6 +4,7 @@ import path from 'node:path';
 import axios from 'axios';
 import {
   DeleteObjectCommand,
+  GetBucketCorsCommand,
   GetObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -75,6 +76,15 @@ const buildS3ObjectKey = (folder: UploadFolder, filename: string): string => {
 const buildFolderPrefix = (folder: UploadFolder): string => {
   const pathParts = [env.awsS3Prefix, folder].filter(Boolean);
   return `${pathParts.join('/')}/`;
+};
+
+const isWildcardMatch = (value: string, pattern: string): boolean => {
+  if (pattern === '*') {
+    return true;
+  }
+
+  const escapedPattern = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  return new RegExp(`^${escapedPattern}$`).test(value);
 };
 
 const buildLocalUploadPath = (folder: UploadFolder, filename: string): string => `${localUploadPrefix}${folder}/${filename}`;
@@ -277,6 +287,53 @@ export const createDirectUploadTargets = async (
       };
     }),
   );
+};
+
+export const validateDirectUploadCors = async (origin: string | null): Promise<void> => {
+  if (env.storageDriver !== 's3' || !origin) {
+    return;
+  }
+
+  try {
+    const response = await getS3Client().send(
+      new GetBucketCorsCommand({
+        Bucket: env.awsS3Bucket,
+      }),
+    );
+    const corsRules = response.CORSRules ?? [];
+    const allowsOrigin = corsRules.some((rule) => {
+      const allowedOrigins = rule.AllowedOrigins ?? [];
+      const allowedMethods = rule.AllowedMethods ?? [];
+      const allowedHeaders = rule.AllowedHeaders ?? [];
+
+      const originAllowed = allowedOrigins.some((allowedOrigin) => isWildcardMatch(origin, allowedOrigin));
+      const putAllowed = allowedMethods.some((method) => method.toUpperCase() === 'PUT');
+      const contentTypeHeaderAllowed =
+        allowedHeaders.length === 0 ||
+        allowedHeaders.some((header) => header === '*' || header.toLowerCase() === 'content-type');
+
+      return originAllowed && putAllowed && contentTypeHeaderAllowed;
+    });
+
+    if (!allowsOrigin) {
+      throw new AppError(
+        `El bucket S3 no permite subidas directas desde ${origin}. Revisa la configuración CORS para permitir PUT y el header Content-Type.`,
+        409,
+      );
+    }
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+
+    const errorName = (error as { name?: string } | null)?.name;
+
+    if (errorName === 'NoSuchCORSConfiguration') {
+      throw new AppError('El bucket S3 no tiene reglas CORS configuradas para subidas directas desde el navegador.', 409);
+    }
+
+    throw new AppError('No se pudo validar la configuración CORS del bucket S3 para subidas directas.', 409);
+  }
 };
 
 export const downloadRemoteImage = async (imageUrl: string, folder: UploadFolder = 'generated'): Promise<StoredFileResult> => {

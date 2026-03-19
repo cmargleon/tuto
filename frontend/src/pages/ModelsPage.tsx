@@ -11,10 +11,11 @@ import {
   CRow,
 } from '../ui';
 import { EmptyState } from '../components/EmptyState';
+import { uploadFilesToStorage } from '../features/storage/uploadFilesToStorage';
 import { ImageThumb } from '../components/ImageThumb';
 import { LoadingBlock } from '../components/LoadingBlock';
 import { PageHeader } from '../components/PageHeader';
-import { createModel, deleteModel, fetchClients, fetchModels, fetchStorageConfig, getApiErrorMessage, updateModel, uploadFilesToStorage } from '../services/api';
+import { createModel, deleteModel, fetchClients, fetchModels, fetchStorageConfig, getApiErrorMessage, updateModel } from '../services/api';
 import type { ClientRecord, ModelRecord, StorageConfig } from '../types/api';
 
 const formatClientDate = (value: string): string =>
@@ -93,8 +94,7 @@ export const ModelsPage = () => {
       setSuccess(null);
 
       const directUploadFiles = Array.from(files);
-      const uploadedImages =
-        storageConfig?.directUpload ? await uploadFilesToStorage('models', directUploadFiles) : undefined;
+      const uploadedImages = await uploadFilesToStorage(storageConfig, 'models', directUploadFiles);
 
       await createModel({
         name,

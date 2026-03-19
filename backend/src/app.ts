@@ -5,6 +5,7 @@ import cors from 'cors';
 import apiRoutes from './routes';
 import { env } from './config/env';
 import { AppError } from './utils/appError';
+import { logger } from './utils/logger';
 
 export const createApp = () => {
   const app = express();
@@ -27,9 +28,7 @@ export const createApp = () => {
 
     res.on('finish', () => {
       const durationMs = Date.now() - startedAt;
-      console.log(
-        `[api] ${req.method} ${req.originalUrl} -> ${res.statusCode} ${durationMs}ms`,
-      );
+      logger.info({ method: req.method, url: req.originalUrl, status: res.statusCode, durationMs }, 'request');
     });
 
     next();
@@ -102,9 +101,11 @@ export const createApp = () => {
     const statusCode = error instanceof AppError ? error.statusCode : 500;
     const message = error instanceof Error ? error.message : 'Error interno del servidor';
 
-    res.status(statusCode).json({
-      message,
-    });
+    if (statusCode >= 500) {
+      logger.error({ err: error }, message);
+    }
+
+    res.status(statusCode).json({ message });
   });
 
   return app;

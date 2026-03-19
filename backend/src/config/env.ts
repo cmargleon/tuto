@@ -10,6 +10,7 @@ dotenv.config({ path: path.resolve(backendRoot, '.env'), override: true });
 const resolvePath = (value: string | undefined, fallbackRelativePath: string): string => {
   const raw = value ?? fallbackRelativePath;
 
+  if (raw === ':memory:') return ':memory:';
   return path.isAbsolute(raw) ? raw : path.resolve(backendRoot, raw);
 };
 
@@ -32,6 +33,10 @@ export const env = {
   storageDriver: process.env.STORAGE_DRIVER === 's3' ? 's3' : 'local',
   uploadMaxFileSizeMb: parseNumber(process.env.UPLOAD_MAX_FILE_SIZE_MB, 20),
   workerPollIntervalMs: parseNumber(process.env.WORKER_POLL_INTERVAL_MS, 5000),
+  workerJobTimeoutMs: parseNumber(process.env.WORKER_JOB_TIMEOUT_MS, 15 * 60 * 1000),
+  workerMaxRetries: parseNumber(process.env.WORKER_MAX_RETRIES, 3),
+  batchMaxJobs: parseNumber(process.env.BATCH_MAX_JOBS, 50),
+  dataRetentionDays: parseNumber(process.env.DATA_RETENTION_DAYS, 60),
   falKey: process.env.FAL_KEY ?? '',
   openaiApiKey: process.env.OPENAI_API_KEY ?? '',
   openaiBaseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',

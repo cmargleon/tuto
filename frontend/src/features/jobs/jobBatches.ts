@@ -130,8 +130,15 @@ const triggerDownload = (blob: Blob, filename: string): void => {
   window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
 };
 
-export const downloadBatchImages = async (batch: JobBatch, resolveAssetUrl: (path: string | null | undefined) => string): Promise<number> => {
+export const downloadBatchImages = async (batch: JobBatch, resolveDownloadUrl: (path: string | null | undefined) => string): Promise<number> => {
   const jobsWithOutput = batch.jobs.filter((job) => getCurrentOutput(job));
+
+  console.log('[download] total jobs:', batch.jobs.length, '| with output:', jobsWithOutput.length);
+
+  if (jobsWithOutput.length === 0) {
+    return 0;
+  }
+
   const zip = new JSZip();
 
   for (const job of jobsWithOutput) {
@@ -141,10 +148,13 @@ export const downloadBatchImages = async (batch: JobBatch, resolveAssetUrl: (pat
       continue;
     }
 
-    const response = await fetch(resolveAssetUrl(output.resultImage));
+    const downloadUrl = resolveDownloadUrl(output.resultImage);
+    console.log('[download] fetching job', job.id, downloadUrl);
+
+    const response = await fetch(downloadUrl);
 
     if (!response.ok) {
-      throw new Error(`No se pudo descargar la imagen del trabajo #${job.id}.`);
+      throw new Error(`No se pudo descargar la imagen del trabajo #${job.id} (HTTP ${response.status}).`);
     }
 
     const blob = await response.blob();
@@ -157,10 +167,6 @@ export const downloadBatchImages = async (batch: JobBatch, resolveAssetUrl: (pat
     ].join('_');
 
     zip.file(filename, blob);
-  }
-
-  if (jobsWithOutput.length === 0) {
-    return 0;
   }
 
   const zipBlob = await zip.generateAsync({ type: 'blob' });

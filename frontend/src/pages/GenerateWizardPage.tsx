@@ -23,6 +23,7 @@ import { PageHeader } from '../components/PageHeader';
 import { WizardStepper } from '../components/WizardStepper';
 import { DEFAULT_TRY_ON_PROMPT } from '../constants/tryOn';
 import { defaultBackgroundConfig, normalizeBackgroundConfig } from '../features/background/backgroundConfig';
+import { uploadFilesToStorage } from '../features/storage/uploadFilesToStorage';
 import {
   aspectRatioOptions,
   fetchClients,
@@ -32,7 +33,6 @@ import {
   getApiErrorMessage,
   providerOptions,
   resolveAssetUrl,
-  uploadFilesToStorage,
 } from '../services/api';
 import type { AspectRatioKey, ClientRecord, ModelRecord, ProviderKey, StorageConfig } from '../types/api';
 
@@ -243,8 +243,7 @@ export const GenerateWizardPage = () => {
       setSuccess(null);
 
       const garmentFiles = uploadedGarments.map((garment) => garment.file);
-      const uploadedGarmentsForRequest =
-        storageConfig?.directUpload ? await uploadFilesToStorage('garments', garmentFiles) : undefined;
+      const uploadedGarmentsForRequest = await uploadFilesToStorage(storageConfig, 'garments', garmentFiles);
 
       const response = await generateJobs({
         clientId: selectedClientId,

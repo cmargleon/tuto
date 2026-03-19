@@ -835,6 +835,10 @@ p {
   gap: 1rem;
 }
 
+.evaluation-panel-stack-with-floating-action {
+  padding-bottom: 7rem;
+}
+
 .evaluation-section-head,
 .archive-toolbar,
 .archive-actions,
@@ -883,6 +887,34 @@ p {
 
 .archive-actions {
   justify-content: flex-end;
+}
+
+.archive-floating-actions {
+  position: fixed;
+  right: 2rem;
+  bottom: 2rem;
+  z-index: 1200;
+}
+
+.archive-floating-button {
+  min-height: 3.5rem;
+  padding-inline: 1.35rem !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 999px !important;
+  background: linear-gradient(135deg, #25d366, #128c7e) !important;
+  box-shadow: 0 18px 40px rgba(18, 140, 126, 0.38);
+  font-weight: 700 !important;
+}
+
+.archive-floating-button:hover,
+.archive-floating-button:focus-visible {
+  transform: translateY(-2px);
+  box-shadow: 0 22px 44px rgba(18, 140, 126, 0.45);
+}
+
+.archive-floating-button:disabled {
+  background: linear-gradient(135deg, rgba(37, 211, 102, 0.6), rgba(18, 140, 126, 0.6)) !important;
+  box-shadow: none;
 }
 
 .material-file-input {
@@ -1234,5 +1266,16 @@ p {
 
   .material-toolbar {
     min-height: 68px !important;
+  }
+
+  .archive-floating-actions {
+    right: 1rem;
+    left: 1rem;
+    bottom: 1rem;
+  }
+
+  .archive-floating-button {
+    width: 100%;
+    justify-content: center;
   }
 }

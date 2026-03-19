@@ -2,6 +2,7 @@
   "name": "catalog-tryon-mvp",
   "private": true,
   "workspaces": [
+    "shared",
     "backend",
     "frontend"
   ],

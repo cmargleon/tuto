@@ -1,5 +1,6 @@
 import axios from 'axios';
 import type {
+  AnalyticsData,
   AspectRatioKey,
   ArchiveClientSummary,
   DirectUploadTarget,
@@ -51,10 +52,22 @@ export const aspectRatioOptions: Array<{ key: AspectRatioKey; label: string }> =
 
 export const getApiErrorMessage = (error: unknown): string => {
   if (axios.isAxiosError(error)) {
+    if (!error.response) {
+      return 'No se pudo conectar con el backend. Revisa que el servidor siga corriendo y que la red esté disponible.';
+    }
+
     return String(error.response?.data?.message ?? error.message);
   }
 
-  return error instanceof Error ? error.message : 'Error inesperado.';
+  if (error instanceof Error) {
+    if (error.message === 'Failed to fetch' || error.message.includes('NetworkError')) {
+      return 'El navegador no pudo completar la subida al storage. Revisa CORS del bucket S3 o tu conexión.';
+    }
+
+    return error.message;
+  }
+
+  return 'Error inesperado.';
 };
 
 export const resolveAssetUrl = (filePath: string | null | undefined): string => {
@@ -67,6 +80,27 @@ export const resolveAssetUrl = (filePath: string | null | undefined): string => 
   }
 
   const assetPath = `/api/assets?path=${encodeURIComponent(filePath)}`;
+
+  if (!apiBaseUrl) {
+    return assetPath;
+  }
+
+  return new URL(assetPath, apiBaseUrl).toString();
+};
+
+// Same as resolveAssetUrl but forces content to stream through the backend (proxy=1).
+// Use this for fetch() calls (e.g. zip downloads) to avoid CORS errors when the backend
+// would otherwise redirect to a cross-origin URL such as a pre-signed S3 URL.
+export const resolveProxyAssetUrl = (filePath: string | null | undefined): string => {
+  if (!filePath) {
+    return '';
+  }
+
+  if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
+    return filePath;
+  }
+
+  const assetPath = `/api/assets?path=${encodeURIComponent(filePath)}&proxy=1`;
 
   if (!apiBaseUrl) {
     return assetPath;
@@ -220,7 +254,7 @@ export const fetchArchiveBatchJobs = async (batchId: string): Promise<JobRecord[
   return response.data;
 };
 
-export const createPresignedUploads = async (
+export const requestPresignedUploads = async (
   folder: 'models' | 'garments',
   files: File[],
 ): Promise<DirectUploadTarget[]> => {
@@ -235,34 +269,23 @@ export const createPresignedUploads = async (
   return response.data.uploads;
 };
 
-export const uploadFilesToStorage = async (
-  folder: 'models' | 'garments',
-  files: File[],
-): Promise<UploadedStorageFileRecord[]> => {
-  const uploads = await createPresignedUploads(folder, files);
+export const cleanupDirectUploads = async (folder: 'models' | 'garments', paths: string[]): Promise<void> => {
+  if (paths.length === 0) {
+    return;
+  }
 
-  await Promise.all(
-    uploads.map(async (upload, index) => {
-      const file = files[index];
-      const response = await fetch(upload.uploadUrl, {
-        method: 'PUT',
-        headers: upload.headers,
-        body: file,
-      });
-
-      if (!response.ok) {
-        throw new Error(`No se pudo subir ${file.name} al storage privado.`);
-      }
-    }),
-  );
-
-  return uploads.map((upload, index) => ({
-    originalName: files[index]?.name ?? `archivo-${index + 1}`,
-    storagePath: upload.storagePath,
-  }));
+  await api.post('/api/storage/cleanup', {
+    folder,
+    paths,
+  });
 };
 
 export const regenerateJob = async (jobId: number, input: RegenerateJobRequest): Promise<JobRecord> => {
   const response = await api.post<JobRecord>(`/api/jobs/${jobId}/regenerate`, input);
+  return response.data;
+};
+
+export const fetchAnalytics = async (): Promise<AnalyticsData> => {
+  const response = await api.get<AnalyticsData>('/api/analytics');
   return response.data;
 };

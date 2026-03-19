@@ -1,7 +1,16 @@
 import { buildGenerationPrompt } from '../background/promptBuilders';
+import { env } from '../config/env';
 import { materializeStoredFile } from '../storage/fileStorage';
 import { getImageProvider } from '../providers/providerFactory';
-import { addJobLog, claimNextPendingJob, completeJob, failJob, requeueProcessingJobs } from '../services/jobService';
+import { logger } from '../utils/logger';
+import {
+  addJobLog,
+  claimNextPendingJob,
+  completeJob,
+  requeueProcessingJobs,
+  requeueStuckJobs,
+  retryOrFailJob,
+} from '../services/jobService';
 
 let timer: NodeJS.Timeout | null = null;
 let running = false;
@@ -32,6 +41,11 @@ const serializeError = (error: unknown) => {
 };
 
 const processNextJob = async (): Promise<void> => {
+  const stuck = requeueStuckJobs(env.workerJobTimeoutMs);
+  if (stuck > 0) {
+    logger.warn({ count: stuck, timeoutMs: env.workerJobTimeoutMs }, 'worker: jobs stuck detectados y re-encolados');
+  }
+
   if (running) {
     return;
   }
@@ -92,13 +106,14 @@ const processNextJob = async (): Promise<void> => {
       await Promise.allSettled(cleanupTasks);
     }
   } catch (error) {
-    failJob(job.id);
+    retryOrFailJob(job.id, env.workerMaxRetries);
     addJobLog(job.id, {
       provider: job.provider,
       aspectRatio: job.aspectRatio,
       finalPrompt: job.prompt,
       error: serializeError(error),
     });
+    logger.error({ jobId: job.id, provider: job.provider, err: serializeError(error) }, 'worker: job falló');
   } finally {
     running = false;
   }

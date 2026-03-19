@@ -1,6 +1,7 @@
 import { db } from '../db';
 import { normalizeBackgroundConfig } from '../background/config';
 import { DEFAULT_TRY_ON_PROMPT } from '../constants/tryOn';
+import { env } from '../config/env';
 import { isAspectRatioKey, type GenerateJobsInput } from '../types/domain';
 import { getClientById } from './clientService';
 import { getModelById } from './modelService';
@@ -56,6 +57,14 @@ export const createGenerationJobs = (input: GenerateJobsInput): { createdJobs: n
   });
 
   const uniquePoseIds = [...new Set(input.poseImageIds)];
+  const totalJobs = uniquePoseIds.length * input.garments.length;
+
+  if (totalJobs > env.batchMaxJobs) {
+    throw new AppError(
+      `El lote excede el límite de ${env.batchMaxJobs} trabajos (${totalJobs} solicitados). Reducí la cantidad de poses o prendas.`,
+    );
+  }
+
   const prompt = input.prompt.trim() || defaultTryOnPrompt;
   const backgroundConfig = normalizeBackgroundConfig(input.backgroundConfig);
   const batchId = `batch-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -67,8 +76,8 @@ export const createGenerationJobs = (input: GenerateJobsInput): { createdJobs: n
   const insertManyJobs = db.transaction(() => {
     let createdJobs = 0;
 
-    uniquePoseIds.forEach((poseImageId) => {
-      input.garments.forEach((garment) => {
+    input.garments.forEach((garment) => {
+      uniquePoseIds.forEach((poseImageId) => {
         insertJob.run(
           batchId,
           input.clientId,

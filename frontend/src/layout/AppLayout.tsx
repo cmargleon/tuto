@@ -8,13 +8,14 @@ import {
   Toolbar,
   Typography,
 } from '@mui/material';
+import ArchiveRoundedIcon from '@mui/icons-material/ArchiveRounded';
+import AutoAwesomeMotionRoundedIcon from '@mui/icons-material/AutoAwesomeMotionRounded';
+import BarChartRoundedIcon from '@mui/icons-material/BarChartRounded';
 import DashboardRoundedIcon from '@mui/icons-material/DashboardRounded';
+import FactCheckRoundedIcon from '@mui/icons-material/FactCheckRounded';
 import Groups2RoundedIcon from '@mui/icons-material/Groups2Rounded';
 import MenuRoundedIcon from '@mui/icons-material/MenuRounded';
 import ViewInArRoundedIcon from '@mui/icons-material/ViewInArRounded';
-import AutoAwesomeMotionRoundedIcon from '@mui/icons-material/AutoAwesomeMotionRounded';
-import FactCheckRoundedIcon from '@mui/icons-material/FactCheckRounded';
-import ArchiveRoundedIcon from '@mui/icons-material/ArchiveRounded';
 
 const navigation = [
   { to: '/dashboard', label: 'Panel', icon: DashboardRoundedIcon },
@@ -23,6 +24,7 @@ const navigation = [
   { to: '/generate', label: 'Generar imágenes', icon: AutoAwesomeMotionRoundedIcon },
   { to: '/evaluacion', label: 'Evaluación', icon: FactCheckRoundedIcon },
   { to: '/archivo', label: 'Archivo', icon: ArchiveRoundedIcon },
+  { to: '/analytics', label: 'Analytics', icon: BarChartRoundedIcon },
 ];
 
 const sidebarWidth = 280;

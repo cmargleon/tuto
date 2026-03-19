@@ -1,3 +1,27 @@
+import type {
+  BackgroundConfig,
+  BackgroundContrast,
+  BackgroundDominantColor,
+  BackgroundLighting,
+  BackgroundMode,
+  BackgroundProminence,
+  BackgroundRealism,
+  BackgroundScene,
+  BackgroundSeparation,
+} from '@tuto/shared';
+
+export type {
+  BackgroundConfig,
+  BackgroundContrast,
+  BackgroundDominantColor,
+  BackgroundLighting,
+  BackgroundMode,
+  BackgroundProminence,
+  BackgroundRealism,
+  BackgroundScene,
+  BackgroundSeparation,
+};
+
 const backgroundModes = [
   'white',
   'bokeh',
@@ -55,31 +79,6 @@ const backgroundProminenceOptions = ['minimal', 'medium', 'editorial'] as const;
 const backgroundContrastOptions = ['soft', 'medium', 'high'] as const;
 const backgroundRealismOptions = ['catalogo_realista', 'campana_lifestyle'] as const;
 const backgroundSeparationOptions = ['standard', 'strong', 'maximum'] as const;
-
-export type BackgroundMode = (typeof backgroundModes)[number];
-export type BackgroundScene = (typeof backgroundScenes)[number];
-export type BackgroundLighting = (typeof backgroundLightingOptionsList)[number];
-export type BackgroundDominantColor = (typeof backgroundDominantColors)[number];
-export type BackgroundProminence = (typeof backgroundProminenceOptions)[number];
-export type BackgroundContrast = (typeof backgroundContrastOptions)[number];
-export type BackgroundRealism = (typeof backgroundRealismOptions)[number];
-export type BackgroundSeparation = (typeof backgroundSeparationOptions)[number];
-
-export interface BackgroundConfig {
-  mode: BackgroundMode;
-  scene: BackgroundScene;
-  lighting: BackgroundLighting;
-  bokehStrength: number;
-  dominantColor: BackgroundDominantColor;
-  prominence: BackgroundProminence;
-  contrast: BackgroundContrast;
-  realism: BackgroundRealism;
-  separation: BackgroundSeparation;
-  avoidExtraPeople: boolean;
-  avoidDistractingProps: boolean;
-  avoidTextSignage: boolean;
-  customDetail: string;
-}
 
 interface SummaryItem {
   label: string;

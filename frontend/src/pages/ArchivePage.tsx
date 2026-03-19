@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react';
-import { flushSync } from 'react-dom';
 import { CAlert, CButton, CCard, CCardBody, CCardHeader, CFormSelect } from '../ui';
+import { JobBatchCarousel } from '../components/evaluation/JobBatchCarousel';
 import { EmptyState } from '../components/EmptyState';
-import { GarmentCarouselControls } from '../components/evaluation/GarmentCarouselControls';
-import { JobEvaluationCard } from '../components/evaluation/JobEvaluationCard';
 import { LoadingBlock } from '../components/LoadingBlock';
 import { PageHeader } from '../components/PageHeader';
 import {
@@ -11,13 +9,11 @@ import {
   fetchArchiveBatches,
   fetchArchiveClients,
   getApiErrorMessage,
-  regenerateJob,
-  resolveAssetUrl,
+  resolveProxyAssetUrl,
 } from '../services/api';
 import type { ArchiveBatchSummary, ArchiveClientSummary, JobRecord } from '../types/api';
 import { downloadBatchImages, formatBatchDate, type JobBatch } from '../features/jobs/jobBatches';
-import { buildInitialDraft, syncJobDrafts, updateJobDraftState, type JobDraft } from '../features/jobs/jobDrafts';
-import { useGarmentCarousel } from '../features/jobs/useGarmentCarousel';
+import { useJobRegeneration } from '../features/jobs/useJobRegeneration';
 
 const archivePageSize = 20;
 
@@ -35,13 +31,18 @@ export const ArchivePage = () => {
   const [loadingBatchJobs, setLoadingBatchJobs] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [jobDrafts, setJobDrafts] = useState<Record<number, JobDraft>>({});
-  const [queueingJobIds, setQueueingJobIds] = useState<number[]>([]);
   const [selectedClientId, setSelectedClientId] = useState('');
   const [selectedBatchId, setSelectedBatchId] = useState('');
   const [downloadingBatchId, setDownloadingBatchId] = useState<string | null>(null);
   const [batchPage, setBatchPage] = useState(1);
   const [batchTotalPages, setBatchTotalPages] = useState(0);
+  const { jobDrafts, queueingJobIds, regenerateJobWithDraft, updateJobDraft } = useJobRegeneration({
+    jobs: batchJobs,
+    onError: setError,
+    onSuccess: setSuccess,
+    setJobs: setBatchJobs,
+    successMessage: (job) => `La regeneración del trabajo #${job.id} quedó en cola.`,
+  });
 
   const loadArchiveClients = async (showLoading = false) => {
     try {
@@ -145,18 +146,7 @@ export const ArchivePage = () => {
     void loadBatchJobs(selectedBatchId, true);
   }, [selectedBatchId]);
 
-  useEffect(() => {
-    setJobDrafts((currentDrafts) => syncJobDrafts(batchJobs, currentDrafts));
-  }, [batchJobs]);
-
-  useEffect(() => {
-    setQueueingJobIds((currentIds) =>
-      currentIds.filter((jobId) => batchJobs.find((job) => job.id === jobId)?.status === 'pending'),
-    );
-  }, [batchJobs]);
-
   const selectedBatch = archiveBatches.find((batch) => batch.batchId === selectedBatchId) ?? null;
-  const { activeSlide, activeSlideIndex, garmentSlides, goToSlide } = useGarmentCarousel(batchJobs);
   const shouldPollArchive =
     queueingJobIds.length > 0 || batchJobs.some((job) => job.status === 'pending' || job.status === 'processing');
 
@@ -208,44 +198,19 @@ export const ArchivePage = () => {
         completedImages: selectedBatch.completedImages,
       };
 
-      const downloadedCount = await downloadBatchImages(batchForDownload, resolveAssetUrl);
-      setSuccess(`Se descargaron ${downloadedCount} imagen${downloadedCount === 1 ? '' : 'es'} del archivo.`);
+      console.log('[archive] batchJobs:', batchJobs.length, 'selectedBatch:', selectedBatch.batchId);
+
+      const downloadedCount = await downloadBatchImages(batchForDownload, resolveProxyAssetUrl);
+
+      if (downloadedCount === 0) {
+        setError('Este lote no tiene imágenes completadas para descargar.');
+      } else {
+        setSuccess(`Se descargaron ${downloadedCount} imagen${downloadedCount === 1 ? '' : 'es'} del archivo.`);
+      }
     } catch (downloadError) {
       setError(getApiErrorMessage(downloadError));
     } finally {
       setDownloadingBatchId(null);
-    }
-  };
-
-  const updateJobDraft = (jobId: number, patch: Partial<JobDraft>) => {
-    setJobDrafts((currentDrafts) => updateJobDraftState(batchJobs, currentDrafts, jobId, patch));
-  };
-
-  const handleRegenerate = async (job: JobRecord) => {
-    const draft = jobDrafts[job.id] ?? buildInitialDraft(job);
-
-    if (!draft.prompt.trim()) {
-      setError('El prompt no puede quedar vacío para regenerar una foto.');
-      return;
-    }
-
-    try {
-      flushSync(() => {
-        setError(null);
-        setSuccess(null);
-        setQueueingJobIds((currentIds) => (currentIds.includes(job.id) ? currentIds : [...currentIds, job.id]));
-      });
-
-      const updatedJob = await regenerateJob(job.id, {
-        provider: draft.provider,
-        prompt: draft.prompt.trim(),
-      });
-
-      setBatchJobs((currentJobs) => currentJobs.map((currentJob) => (currentJob.id === updatedJob.id ? updatedJob : currentJob)));
-      setSuccess(`La regeneración del trabajo #${job.id} quedó en cola.`);
-    } catch (regenerateError) {
-      setQueueingJobIds((currentIds) => currentIds.filter((jobId) => jobId !== job.id));
-      setError(getApiErrorMessage(regenerateError));
     }
   };
 
@@ -284,7 +249,7 @@ export const ArchivePage = () => {
                 description="Cuando generes el primer lote, aparecerá aquí de inmediato organizado por cliente."
               />
             ) : (
-              <div className="evaluation-panel-stack">
+              <div className={`evaluation-panel-stack${selectedBatch ? ' evaluation-panel-stack-with-floating-action' : ''}`}>
                 <div className="archive-toolbar">
                   <div className="archive-filter">
                     <label className="form-label">Cliente</label>
@@ -362,51 +327,22 @@ export const ArchivePage = () => {
 
                     {loadingBatchJobs ? (
                       <LoadingBlock />
-                    ) : !activeSlide ? (
-                      <EmptyState
-                        title="No hay prendas para este trabajo"
-                        description="Este lote archivado no tiene un agrupado de prendas disponible en este momento."
-                      />
                     ) : (
-                      <div className="evaluation-carousel-layout">
-                        <GarmentCarouselControls
-                          activeSlideIndex={activeSlideIndex}
-                          slides={garmentSlides}
-                          onSelectSlide={goToSlide}
-                        />
-
-                        <div className="evaluation-slide-grid">
-                          {activeSlide.jobs.map((job, index) => {
-                            const draft = jobDrafts[job.id] ?? buildInitialDraft(job);
-                            const queueing = queueingJobIds.includes(job.id);
-
-                            return (
-                              <JobEvaluationCard
-                                key={job.id}
-                                draft={draft}
-                                emptyMessage="Este trabajo no tiene una imagen final disponible."
-                                imageAlt={`Resultado archivado del trabajo ${job.id}`}
-                                job={job}
-                                queueing={queueing}
-                                subtitle={job.modelName}
-                                title={`Pose ${index + 1}`}
-                                onRegenerate={handleRegenerate}
-                                onUpdateDraft={updateJobDraft}
-                              />
-                            );
-                          })}
-                        </div>
-
-                        <GarmentCarouselControls
-                          activeSlideIndex={activeSlideIndex}
-                          slides={garmentSlides}
-                          onSelectSlide={goToSlide}
-                        />
-                      </div>
+                      <JobBatchCarousel
+                        emptyDescription="Este lote archivado no tiene un agrupado de prendas disponible en este momento."
+                        emptyTitle="No hay prendas para este trabajo"
+                        getEmptyMessage={() => 'Este trabajo no tiene una imagen final disponible.'}
+                        jobDrafts={jobDrafts}
+                        jobs={batchJobs}
+                        queueingJobIds={queueingJobIds}
+                        onRegenerate={regenerateJobWithDraft}
+                        onUpdateDraft={updateJobDraft}
+                      />
                     )}
 
-                    <div className="archive-actions">
+                    <div className="archive-floating-actions">
                       <CButton
+                        className="archive-floating-button"
                         color="dark"
                         disabled={downloadingBatchId === selectedBatch.batchId}
                         onClick={() => void handleDownloadArchive()}
